@@ -1,19 +1,16 @@
 <script lang="ts">
 	import type { Pill } from "$lib/graph/pills";
 	import type { Divergence } from "$lib/types";
-	import { branchDivergence } from "$lib/ipc";
+	import { divergenceFor } from "$lib/graph/divergenceCache";
 	import * as actions from "$lib/actions";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
 
 	/** The ahead/behind badge's fix-it popover — DESIGN_SPEC.md §4.4 / §15.7 / §15.8. The badge is
 	 * not just an indicator: this offers Pull / Push / view commits, and for a diverged branch the
 	 * warn-tinted variant with rebase / merge / force-push-with-lease options, each with a one-line
-	 * consequence. Pull/Push act on the checked-out branch, so when the pill isn't current we offer
-	 * Checkout instead of a pull that would touch the wrong branch.
-	 *
-	 * SPEC-DEVIATION: §4.4 asks for the up-to-5 commit previews in a hover *tooltip*; fetching
-	 * `git log` on every hover is wasteful, so the previews live in this click popover alongside the
-	 * actions (which is also where "view commits" points). */
+	 * consequence. The click-to-jump commit list here is the "view commits" affordance; the up-to-5
+	 * hover previews live in `BadgeTooltip` (§4.4). Pull/Push act on the checked-out branch, so when
+	 * the pill isn't current we offer Checkout instead of a pull that would touch the wrong branch. */
 	let {
 		pill,
 		repoId,
@@ -35,7 +32,7 @@
 	$effect(() => {
 		if (!pill.localBranch) return;
 		let cancelled = false;
-		branchDivergence(repoId, pill.localBranch)
+		divergenceFor(repoId, pill.localBranch, pill.ahead, pill.behind)
 			.then((d) => {
 				if (!cancelled) div = d;
 			})

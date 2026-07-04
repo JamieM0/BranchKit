@@ -133,6 +133,7 @@
 					<RefPill
 						{pill}
 						colorIndex={row.node.colorIndex}
+						{repoId}
 						onSelect={onPillSelect}
 						onCheckout={onPillCheckout}
 						onBadge={onPillBadge}

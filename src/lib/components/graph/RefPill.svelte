@@ -2,15 +2,18 @@
 	import type { Pill } from "$lib/graph/pills";
 	import { dnd } from "$lib/stores/dnd.svelte";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
+	import BadgeTooltip from "./BadgeTooltip.svelte";
 
 	/** A branch/tag pill in the BRANCH/TAG column — DESIGN_SPEC.md §4.4. Presence icons (💻 local,
 	 * ☁ remote), shared-vs-split is decided upstream in `buildPills`; the ahead/behind badge is a
-	 * *button* (click → fix-it popover), diverged badges are warn-tinted. Single-click selects,
-	 * double-click checks out (remote-only → track + checkout), right-click opens the branch menu,
-	 * and the pill is draggable onto other pills/rows for the merge/rebase/ff drop menu. */
+	 * *button* (click → fix-it popover) that also shows a hover tooltip of up to 5 commit summaries,
+	 * and diverged badges are warn-tinted. Single-click selects, double-click checks out (remote-only
+	 * → track + checkout), right-click opens the branch menu, and the pill is draggable onto other
+	 * pills/rows for the merge/rebase/ff drop menu. */
 	let {
 		pill,
 		colorIndex,
+		repoId,
 		onSelect,
 		onCheckout,
 		onBadge,
@@ -19,6 +22,7 @@
 	}: {
 		pill: Pill;
 		colorIndex: number;
+		repoId: string | null;
 		onSelect: (pill: Pill) => void;
 		onCheckout: (pill: Pill) => void;
 		onBadge: (pill: Pill, x: number, y: number) => void;
@@ -40,6 +44,24 @@
 		if (pill.ahead > 0) parts.push(`${pill.ahead} to push`);
 		if (pill.behind > 0) parts.push(`${pill.behind} to pull`);
 		return parts.join(", ");
+	}
+
+	// Hover tooltip of commit previews — DESIGN_SPEC §4.4, 400ms delay per §2.5.
+	let tip = $state<{ x: number; y: number } | null>(null);
+	let tipTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function openTip(e: MouseEvent) {
+		if (!repoId || !pill.localBranch) return;
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		clearTimeout(tipTimer);
+		tipTimer = setTimeout(() => {
+			tip = { x: rect.left + rect.width / 2, y: rect.bottom + 6 };
+		}, 400);
+	}
+
+	function closeTip() {
+		clearTimeout(tipTimer);
+		tip = null;
 	}
 
 	function onDragStart(e: DragEvent) {
@@ -110,19 +132,25 @@
 			type="button"
 			class="badge"
 			class:diverged={pill.diverged}
-			title={badgeLabel()}
 			aria-label={badgeLabel()}
 			onclick={(e) => {
 				e.stopPropagation();
+				closeTip();
 				onBadge(pill, e.clientX, e.clientY);
 			}}
 			ondblclick={(e) => e.stopPropagation()}
+			onmouseenter={openTip}
+			onmouseleave={closeTip}
 		>
 			{#if pill.ahead > 0}<span class="ab ahead">↑{pill.ahead}</span>{/if}
 			{#if pill.behind > 0}<span class="ab behind">↓{pill.behind}</span>{/if}
 		</button>
 	{/if}
 </span>
+
+{#if tip && repoId}
+	<BadgeTooltip {pill} {repoId} x={tip.x} y={tip.y} />
+{/if}
 
 <style>
 	.pill {
