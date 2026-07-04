@@ -1,7 +1,15 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { getCommitMeta, getGraph, getRefs, onRepoChanged } from "$lib/ipc";
+import { getCommitMeta, getGraph, getRefs, getWorktrees, onRepoChanged } from "$lib/ipc";
 import { assignLanes, type GraphLaneRow, type LaneAssignment } from "$lib/graph/lanes";
-import type { ChangeKind, CommitMeta, GraphTopologyRow, HeadInfo, RefInfo } from "$lib/types";
+import { buildPills, type Pill } from "$lib/graph/pills";
+import type {
+	ChangeKind,
+	CommitMeta,
+	GraphTopologyRow,
+	HeadInfo,
+	RefInfo,
+	WorktreeInfo,
+} from "$lib/types";
 
 const METADATA_BATCH_SIZE = 200;
 
@@ -9,12 +17,14 @@ export type GraphViewRow = GraphLaneRow & {
 	index: number;
 	meta: CommitMeta | null;
 	refs: RefInfo[];
+	pills: Pill[];
 };
 
 export interface GraphStoreDeps {
 	getGraph(repoId: string): Promise<GraphTopologyRow[]>;
 	getCommitMeta(repoId: string, shas: string[]): Promise<CommitMeta[]>;
 	getRefs(repoId: string): Promise<{ refs: RefInfo[]; head: HeadInfo }>;
+	getWorktrees(repoId: string): Promise<WorktreeInfo[]>;
 	onRepoChanged(repoId: string, handler: (kind: ChangeKind) => void): Promise<UnlistenFn>;
 	assignLanes(topology: readonly GraphTopologyRow[]): LaneAssignment;
 }
@@ -23,6 +33,7 @@ const defaultDeps: GraphStoreDeps = {
 	getGraph,
 	getCommitMeta,
 	getRefs,
+	getWorktrees,
 	onRepoChanged,
 	assignLanes,
 };
@@ -60,6 +71,12 @@ export class GraphStore {
 	laneColors: number[] = $state([]);
 	metaBySha: Record<string, CommitMeta> = $state({});
 	refsBySha: Record<string, RefInfo[]> = $state({});
+	/** Flat ref list (LOCAL/REMOTES/TAGS in the left panel) — DESIGN_SPEC §5. */
+	refs: RefInfo[] = $state([]);
+	/** Grouped branch/tag pills (shared/split, presence, ahead/behind) — DESIGN_SPEC §4.4. */
+	pillsBySha: Record<string, Pill[]> = $state({});
+	/** Linked worktrees for the left-panel WORKTREES section (§5). */
+	worktrees: WorktreeInfo[] = $state([]);
 	head: HeadInfo | null = $state(null);
 	loading = $state(false);
 	error: unknown = $state(null);
@@ -71,7 +88,13 @@ export class GraphStore {
 			index,
 			meta: row.kind === "commit" ? (this.metaBySha[row.sha] ?? null) : null,
 			refs: this.refsBySha[row.sha] ?? [],
+			pills: this.pillsBySha[row.sha] ?? [],
 		})),
+	);
+
+	/** Stash pseudo-rows (left-panel STASHES section, §5) — they live inline in the topology. */
+	stashes = $derived(
+		this.laneRows.filter((r): r is Extract<GraphLaneRow, { kind: "stash" }> => r.kind === "stash"),
 	);
 
 	#deps: GraphStoreDeps;
@@ -91,7 +114,7 @@ export class GraphStore {
 			void this.handleChange(kind);
 		});
 		try {
-			await Promise.all([this.reloadTopology(), this.refreshRefs()]);
+			await Promise.all([this.reloadTopology(), this.refreshRefs(), this.refreshWorktrees()]);
 		} catch (e) {
 			this.error = e;
 			throw e;
@@ -111,6 +134,9 @@ export class GraphStore {
 		this.laneColors = [];
 		this.metaBySha = {};
 		this.refsBySha = {};
+		this.refs = [];
+		this.pillsBySha = {};
+		this.worktrees = [];
 		this.head = null;
 		this.#metaInFlight.clear();
 	}
@@ -130,8 +156,15 @@ export class GraphStore {
 	async refreshRefs(): Promise<void> {
 		if (!this.repoId) return;
 		const response = await this.#deps.getRefs(this.repoId);
+		this.refs = response.refs;
 		this.refsBySha = refsBySha(response.refs);
 		this.head = response.head;
+		this.pillsBySha = buildPills(response.refs, response.head);
+	}
+
+	async refreshWorktrees(): Promise<void> {
+		if (!this.repoId) return;
+		this.worktrees = await this.#deps.getWorktrees(this.repoId);
 	}
 
 	async ensureMetadataForWindow(start: number, end: number): Promise<void> {
@@ -164,11 +197,11 @@ export class GraphStore {
 			return;
 		}
 		if (kind.kind === "refs" || kind.kind === "remote") {
-			await this.refreshRefs();
+			await Promise.all([this.refreshRefs(), this.refreshWorktrees()]);
 			return;
 		}
 		if (kind.kind === "head") {
-			await Promise.all([this.reloadTopology(), this.refreshRefs()]);
+			await Promise.all([this.reloadTopology(), this.refreshRefs(), this.refreshWorktrees()]);
 		}
 	}
 }

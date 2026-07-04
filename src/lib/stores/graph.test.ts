@@ -27,6 +27,7 @@ function deps(overrides: Partial<GraphStoreDeps> = {}): GraphStoreDeps {
 		getGraph: vi.fn(async () => topology),
 		getCommitMeta: vi.fn(async () => []),
 		getRefs: vi.fn(async () => ({ refs: [mainRef], head })),
+		getWorktrees: vi.fn(async () => []),
 		onRepoChanged: vi.fn(async () => () => {}),
 		assignLanes: vi.fn(assignLanes),
 		...overrides,

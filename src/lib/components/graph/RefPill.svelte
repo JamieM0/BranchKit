@@ -1,26 +1,127 @@
 <script lang="ts">
-	import type { RefInfo } from "$lib/types";
+	import type { Pill } from "$lib/graph/pills";
+	import { dnd } from "$lib/stores/dnd.svelte";
+	import { graphNav } from "$lib/stores/graphNav.svelte";
 
-	/** A branch/tag label in the BRANCH/TAG column — DESIGN_SPEC.md §4.4. This is the read-only
-	 * rendering; the rich interactions (drag-to-merge, ahead/behind fix-it popover, presence icons)
-	 * arrive with the branch menus in prompt 7. The border tint matches the commit's lane color. */
-	let { ref, colorIndex }: { ref: RefInfo; colorIndex: number } = $props();
+	/** A branch/tag pill in the BRANCH/TAG column — DESIGN_SPEC.md §4.4. Presence icons (💻 local,
+	 * ☁ remote), shared-vs-split is decided upstream in `buildPills`; the ahead/behind badge is a
+	 * *button* (click → fix-it popover), diverged badges are warn-tinted. Single-click selects,
+	 * double-click checks out (remote-only → track + checkout), right-click opens the branch menu,
+	 * and the pill is draggable onto other pills/rows for the merge/rebase/ff drop menu. */
+	let {
+		pill,
+		colorIndex,
+		onSelect,
+		onCheckout,
+		onBadge,
+		onMenu,
+		onDrop,
+	}: {
+		pill: Pill;
+		colorIndex: number;
+		onSelect: (pill: Pill) => void;
+		onCheckout: (pill: Pill) => void;
+		onBadge: (pill: Pill, x: number, y: number) => void;
+		onMenu: (pill: Pill, x: number, y: number) => void;
+		onDrop: (pill: Pill) => void;
+	} = $props();
 
-	const isTag = $derived(ref.kind === "tag");
+	const hasBadge = $derived(pill.ahead > 0 || pill.behind > 0);
+	// A pill can be dropped onto if a *different* branch/commit is being dragged.
+	const isDropTarget = $derived(
+		dnd.dragging && dnd.source !== null && dnd.source.key !== pill.key,
+	);
+	const glowing = $derived(
+		(dnd.overKey === pill.key && isDropTarget) || graphNav.glowSha === pill.sha,
+	);
+
+	function badgeLabel(): string {
+		const parts: string[] = [];
+		if (pill.ahead > 0) parts.push(`${pill.ahead} to push`);
+		if (pill.behind > 0) parts.push(`${pill.behind} to pull`);
+		return parts.join(", ");
+	}
+
+	function onDragStart(e: DragEvent) {
+		dnd.start(pill);
+		// dataTransfer needs *something* or Firefox won't start the drag; the real payload is dnd.source.
+		e.dataTransfer?.setData("text/plain", pill.key);
+		if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+	}
+
+	function onDragOver(e: DragEvent) {
+		if (!isDropTarget) return;
+		e.preventDefault();
+		dnd.setOver(pill.key, e.clientX, e.clientY);
+	}
+
+	function onDragLeave() {
+		if (dnd.overKey === pill.key) dnd.setOver(null);
+	}
+
+	function handleDrop(e: DragEvent) {
+		if (!isDropTarget) return;
+		e.preventDefault();
+		e.stopPropagation();
+		onDrop(pill);
+	}
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 <span
 	class="pill"
-	class:tag={isTag}
-	class:head={ref.isHead}
+	class:tag={pill.kind === "tag"}
+	class:head={pill.isHead}
+	class:glow={glowing}
+	class:remote-only={pill.isRemoteOnly}
 	style="--pill-lane: var(--lane-{colorIndex});"
-	title={ref.upstream ? `tracks ${ref.upstream}` : ref.shortName}
+	role="button"
+	tabindex="-1"
+	draggable={pill.kind === "branch"}
+	title={pill.kind === "tag" ? `tag ${pill.name}` : pill.name}
+	onclick={(e) => {
+		e.stopPropagation();
+		onSelect(pill);
+	}}
+	ondblclick={(e) => {
+		e.stopPropagation();
+		onCheckout(pill);
+	}}
+	oncontextmenu={(e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		onMenu(pill, e.clientX, e.clientY);
+	}}
+	ondragstart={onDragStart}
+	ondragend={() => dnd.end()}
+	ondragover={onDragOver}
+	ondragleave={onDragLeave}
+	ondrop={handleDrop}
 >
-	{#if ref.isHead}<span class="check" aria-hidden="true">✓</span>{/if}
-	{#if isTag}<span class="tag-glyph" aria-hidden="true">⌗</span>{/if}
-	<span class="name">{ref.shortName}</span>
-	{#if ref.ahead > 0}<span class="ab ahead">↑{ref.ahead}</span>{/if}
-	{#if ref.behind > 0}<span class="ab behind">↓{ref.behind}</span>{/if}
+	{#if pill.isHead}<span class="check" title="checked out" aria-hidden="true">✓</span>{/if}
+	{#if pill.kind === "tag"}<span class="tag-glyph" aria-hidden="true">🏷</span>{/if}
+	<span class="name">{pill.name}</span>
+	{#if pill.kind === "branch"}
+		{#if pill.local}<span class="presence" title="exists locally" aria-label="local">💻</span>{/if}
+		{#if pill.remote}<span class="presence" title={pill.remoteName ?? "remote"} aria-label="remote">☁</span>{/if}
+	{/if}
+	{#if hasBadge}
+		<button
+			type="button"
+			class="badge"
+			class:diverged={pill.diverged}
+			title={badgeLabel()}
+			aria-label={badgeLabel()}
+			onclick={(e) => {
+				e.stopPropagation();
+				onBadge(pill, e.clientX, e.clientY);
+			}}
+			ondblclick={(e) => e.stopPropagation()}
+		>
+			{#if pill.ahead > 0}<span class="ab ahead">↑{pill.ahead}</span>{/if}
+			{#if pill.behind > 0}<span class="ab behind">↓{pill.behind}</span>{/if}
+		</button>
+	{/if}
 </span>
 
 <style>
@@ -29,7 +130,7 @@
 		align-items: center;
 		gap: 3px;
 		max-width: 100%;
-		padding: 1px 7px;
+		padding: 1px 6px;
 		border: 1px solid var(--pill-lane);
 		border-radius: var(--radius-pill);
 		background: var(--raised);
@@ -37,6 +138,10 @@
 		font-size: 11px;
 		line-height: 16px;
 		white-space: nowrap;
+		cursor: pointer;
+		transition:
+			box-shadow var(--motion-hover),
+			background var(--motion-hover);
 	}
 
 	.pill.tag {
@@ -49,18 +154,60 @@
 		font-weight: 600;
 	}
 
+	.pill.remote-only {
+		border-style: dashed;
+	}
+
+	.pill.glow {
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent);
+		background: color-mix(in srgb, var(--accent) 14%, var(--raised));
+	}
+
 	.check {
 		color: var(--accent);
 		font-size: 10px;
 	}
 
 	.tag-glyph {
-		color: var(--text-muted);
+		font-size: 9px;
+	}
+
+	.presence {
+		font-size: 9px;
+		line-height: 1;
+		filter: grayscale(0.2);
 	}
 
 	.name {
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+
+	.badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		border: none;
+		border-radius: var(--radius-pill);
+		background: transparent;
+		padding: 0 3px;
+		margin: 0 -2px 0 1px;
+		font: inherit;
+		cursor: pointer;
+		line-height: 14px;
+	}
+
+	.badge:hover {
+		background: color-mix(in srgb, var(--text) 10%, transparent);
+	}
+
+	/* Diverged (both ahead and behind) → subtle warn-tinted background (§4.4). */
+	.badge.diverged {
+		background: color-mix(in srgb, var(--warn) 22%, transparent);
+	}
+
+	.badge.diverged:hover {
+		background: color-mix(in srgb, var(--warn) 34%, transparent);
 	}
 
 	.ab {

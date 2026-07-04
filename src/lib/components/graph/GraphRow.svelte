@@ -1,41 +1,102 @@
 <script lang="ts">
 	import RefPill from "./RefPill.svelte";
+	import BranchNameEditor from "./BranchNameEditor.svelte";
 	import { RIGHT_GUTTER, ROW_HEIGHT } from "$lib/graph/geometry";
 	import { graphView } from "$lib/stores/graphView.svelte";
+	import { branchEdit } from "$lib/stores/branchEdit.svelte";
+	import { filter, rowMatchesQuery } from "$lib/stores/filter.svelte";
+	import { dnd } from "$lib/stores/dnd.svelte";
+	import { graphNav } from "$lib/stores/graphNav.svelte";
 	import { relativeTime } from "$lib/format";
 	import type { GraphViewRow } from "$lib/stores/graph.svelte";
+	import type { Pill } from "$lib/graph/pills";
 
-	/** One DOM row overlaying the canvas — DESIGN_SPEC.md §4.3 / §4.5. The GRAPH cell is a
-	 * transparent spacer; the canvas behind draws that row's lanes, node and avatar. Everything else
-	 * (pills, message, metadata) is real, focusable, right-clickable DOM. */
+	/** One DOM row overlaying the canvas — DESIGN_SPEC.md §4.3 / §4.4 / §4.5. The GRAPH cell is a
+	 * transparent spacer; the canvas behind draws that row's lanes/node/avatar. Pills, message and
+	 * metadata are real, focusable, right-clickable DOM. The row is also a drop target for a dragged
+	 * pill (drag pill onto row → merge/rebase/ff, §4.4). */
 	let {
 		row,
 		selected = false,
 		head = false,
+		repoId,
 		onSelect,
 		onActivate,
 		onHover,
 		onCopySha,
+		onPillSelect,
+		onPillCheckout,
+		onPillBadge,
+		onPillMenu,
+		onPillDrop,
+		onRowDrop,
 	}: {
 		row: GraphViewRow;
 		selected?: boolean;
 		head?: boolean;
+		repoId: string | null;
 		onSelect: (sha: string, event: MouseEvent) => void;
 		onActivate: (sha: string, event: MouseEvent) => void;
 		onHover: (sha: string | null) => void;
 		onCopySha: (sha: string) => void;
+		onPillSelect: (pill: Pill) => void;
+		onPillCheckout: (pill: Pill) => void;
+		onPillBadge: (pill: Pill, x: number, y: number) => void;
+		onPillMenu: (pill: Pill, x: number, y: number) => void;
+		onPillDrop: (pill: Pill) => void;
+		onRowDrop: (sha: string) => void;
 	} = $props();
+
+	let expanded = $state(false);
 
 	const isMerge = $derived(row.kind === "commit" && row.parents.length > 1);
 	const descriptionPreview = $derived(
 		row.kind === "commit" && row.meta?.body ? row.meta.body.split("\n")[0].trim() : "",
 	);
-	const visiblePills = $derived(row.refs.slice(0, 2));
-	const overflowCount = $derived(Math.max(0, row.refs.length - 2));
+
+	// Hide-eye: drop pills whose local branch is hidden from the graph (§5/§15.26).
+	const shownPills = $derived(
+		row.pills.filter((p) => !(p.localBranch && filter.isHidden(p.localBranch))),
+	);
+	const visiblePills = $derived(expanded ? shownPills : shownPills.slice(0, 2));
+	const overflowCount = $derived(Math.max(0, shownPills.length - 2));
+	const editingHere = $derived(branchEdit.isEditing(row.sha));
+
+	// Dim (never remove) rows that don't match the universal filter — §15.24.
+	const dimmed = $derived(
+		filter.active &&
+			!rowMatchesQuery(filter.query, {
+				subject: row.kind === "commit" ? (row.meta?.subject ?? "") : row.subject,
+				author: row.kind === "commit" ? (row.meta?.authorName ?? "") : "",
+				sha: row.sha,
+				refNames: row.pills.map((p) => p.name),
+			}),
+	);
+
+	const dropTarget = $derived(dnd.dragging && dnd.overKey === row.sha);
+	const glowing = $derived(graphNav.glowSha === row.sha);
 
 	function copy(e: MouseEvent) {
 		e.stopPropagation();
 		onCopySha(row.sha);
+	}
+
+	function onRowDragOver(e: DragEvent) {
+		if (!dnd.dragging) return;
+		// Don't offer the whole-row target for the pill you started dragging from this very row.
+		if (dnd.source && dnd.source.sha === row.sha) return;
+		e.preventDefault();
+		dnd.setOver(row.sha, e.clientX, e.clientY);
+	}
+
+	function onRowDragLeave() {
+		if (dnd.overKey === row.sha) dnd.setOver(null);
+	}
+
+	function handleRowDrop(e: DragEvent) {
+		if (!dnd.dragging) return;
+		e.preventDefault();
+		onRowDrop(row.sha);
 	}
 </script>
 
@@ -46,6 +107,9 @@
 	class:head
 	class:merge={isMerge}
 	class:stash={row.kind === "stash"}
+	class:dimmed
+	class:drop-target={dropTarget}
+	class:glow={glowing}
 	role="row"
 	tabindex="-1"
 	aria-selected={selected}
@@ -54,13 +118,40 @@
 	ondblclick={(e) => onActivate(row.sha, e)}
 	onmouseenter={() => onHover(row.sha)}
 	onmouseleave={() => onHover(null)}
+	ondragover={onRowDragOver}
+	ondragleave={onRowDragLeave}
+	ondrop={handleRowDrop}
 >
 	<div class="cell branch" style="width: {graphView.widths.branch}px;">
-		{#each visiblePills as ref (ref.name)}
-			<RefPill {ref} colorIndex={row.node.colorIndex} />
-		{/each}
-		{#if overflowCount > 0}
-			<span class="overflow" title="{overflowCount} more refs">+{overflowCount}</span>
+		{#if editingHere && branchEdit.mode === "create" && repoId}
+			<BranchNameEditor {repoId} />
+		{:else}
+			{#each visiblePills as pill (pill.key)}
+				{#if editingHere && branchEdit.mode === "rename" && branchEdit.oldName === pill.localBranch && repoId}
+					<BranchNameEditor {repoId} />
+				{:else}
+					<RefPill
+						{pill}
+						colorIndex={row.node.colorIndex}
+						onSelect={onPillSelect}
+						onCheckout={onPillCheckout}
+						onBadge={onPillBadge}
+						onMenu={onPillMenu}
+						onDrop={onPillDrop}
+					/>
+				{/if}
+			{/each}
+			{#if overflowCount > 0 && !expanded}
+				<button
+					type="button"
+					class="overflow"
+					title="Show {overflowCount} more"
+					onclick={(e) => {
+						e.stopPropagation();
+						expanded = true;
+					}}>+{overflowCount}</button
+				>
+			{/if}
 		{/if}
 	</div>
 
@@ -109,13 +200,10 @@
 		font-size: var(--font-size-ui);
 		color: var(--text);
 		cursor: pointer;
-		/* Translucent so the canvas lanes behind stay visible through the highlight. */
 		background: transparent;
-		transition: background var(--motion-hover);
+		transition: background var(--motion-hover), opacity var(--motion-hover);
 	}
 
-	/* HEAD gets a left accent bar in addition to the canvas node ring, so the current commit is not
-	   signalled by color/ring alone — DESIGN_SPEC.md §14. */
 	.row.head::before {
 		content: "";
 		position: absolute;
@@ -134,13 +222,27 @@
 		background: color-mix(in srgb, var(--accent) 16%, transparent);
 	}
 
+	/* Universal-filter dim — context preserved, never removed (§15.24). */
+	.row.dimmed {
+		opacity: 0.3;
+	}
+
+	/* Valid drop target while dragging a pill (§4.4). */
+	.row.drop-target {
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+	}
+
+	/* Panel-hover glow: this row is a branch tip being hovered in the left panel (§15.25). */
+	.row.glow {
+		background: color-mix(in srgb, var(--info) 14%, transparent);
+	}
+
 	.row.merge {
 		color: var(--text-muted);
 	}
 
 	.cell {
-		/* border-box so a cell's configured px width is its real width — the canvas positions lane
-		   nodes at exactly `branchWidth + laneCenterX`, which only lines up if padding is included. */
 		box-sizing: border-box;
 		display: flex;
 		align-items: center;
@@ -170,9 +272,15 @@
 		font-size: 10px;
 		color: var(--text-muted);
 		background: var(--raised);
+		border: none;
 		border-radius: var(--radius-pill);
 		padding: 0 5px;
 		line-height: 16px;
+		cursor: pointer;
+	}
+
+	.overflow:hover {
+		color: var(--text);
 	}
 
 	.message {

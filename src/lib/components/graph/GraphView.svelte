@@ -2,6 +2,9 @@
 	import GraphColumnHeader from "./GraphColumnHeader.svelte";
 	import GraphRow from "./GraphRow.svelte";
 	import DetachGuardPopover from "./DetachGuardPopover.svelte";
+	import AheadBehindPopover from "./AheadBehindPopover.svelte";
+	import BranchMenu from "./BranchMenu.svelte";
+	import DropMenu from "./DropMenu.svelte";
 	import {
 		anchoredScrollTop,
 		AVATAR_RADIUS,
@@ -14,11 +17,16 @@
 	} from "$lib/graph/geometry";
 	import { AvatarCache, authorInitials, discColorIndex } from "$lib/graph/avatars";
 	import type { GraphSegment, SegmentEnd } from "$lib/graph/lanes";
+	import type { Pill } from "$lib/graph/pills";
 	import { graph } from "$lib/stores/graph.svelte";
 	import { graphSelection } from "$lib/stores/graphSelection.svelte";
 	import { graphView } from "$lib/stores/graphView.svelte";
+	import { branchEdit } from "$lib/stores/branchEdit.svelte";
+	import { dnd } from "$lib/stores/dnd.svelte";
+	import { graphNav } from "$lib/stores/graphNav.svelte";
 	import { theme } from "$lib/stores/theme.svelte";
 	import { isModEvent } from "$lib/platform";
+	import * as actions from "$lib/actions";
 
 	/** The commit graph — DESIGN_SPEC.md §4, ARCHITECTURE.md §5.4. Hand-rolled virtualized DOM rows
 	 * over a single background canvas that draws edges/nodes/avatars for the visible range only,
@@ -27,17 +35,11 @@
 	let {
 		onSelectCommit,
 		onCompare,
-		onCheckout,
-		onCreateBranch,
 		onOpenCommit,
-		onBackToBranch,
 	}: {
 		onSelectCommit?: (sha: string) => void;
 		onCompare?: (a: string, b: string) => void;
-		onCheckout?: (sha: string) => void;
-		onCreateBranch?: (sha: string) => void;
 		onOpenCommit?: (sha: string) => void;
-		onBackToBranch?: () => void;
 	} = $props();
 
 	const CANVAS_FONT_FAMILY = '-apple-system, "Segoe UI", Ubuntu, sans-serif';
@@ -58,6 +60,19 @@
 	let viewportHeight = $state(0);
 	let hoveredSha = $state<string | null>(null);
 	let popover = $state<{ sha: string; x: number; y: number } | null>(null);
+	// Pill overlays — the badge fix-it popover, the branch context menu and the drag drop menu.
+	let badgePopover = $state<{ pill: Pill; x: number; y: number } | null>(null);
+	let branchMenu = $state<{ pill: Pill; x: number; y: number } | null>(null);
+	let dropMenu = $state<{
+		source: Pill;
+		targetPill: Pill | null;
+		targetSha: string;
+		x: number;
+		y: number;
+	} | null>(null);
+
+	const repoId = $derived(graph.repoId);
+	const currentBranch = $derived(graph.head && !graph.head.detached ? graph.head.branch : null);
 
 	// Non-reactive scratch state used only inside the canvas draw / anchoring.
 	let shaIndex = new Map<string, number>();
@@ -367,8 +382,9 @@
 	function handleActivate(sha: string, e: MouseEvent) {
 		const row = graph.rows[shaIndex.get(sha) ?? -1];
 		if (row?.kind === "stash") return; // Pop-with-undo arrives with the stash menu (prompt 11).
+		// Double-click a commit → detached checkout, guarded (§4.6). "Don't ask again" skips the popover.
 		if (graphView.detachDontAsk) {
-			onCheckout?.(sha);
+			if (repoId) void actions.checkoutDetached(repoId, sha);
 			return;
 		}
 		popover = { sha, x: e.clientX, y: e.clientY };
@@ -380,6 +396,59 @@
 		} catch {
 			/* clipboard unavailable — best effort */
 		}
+	}
+
+	function scrollShaIntoView(sha: string) {
+		const idx = shaIndex.get(sha);
+		if (idx !== undefined) scrollRowIntoView(idx);
+	}
+
+	// --- pill interactions (DESIGN_SPEC §4.4) ---
+
+	function handlePillSelect(pill: Pill) {
+		graphSelection.select(pill.sha);
+		onSelectCommit?.(pill.sha);
+		scrollShaIntoView(pill.sha);
+	}
+
+	function handlePillCheckout(pill: Pill) {
+		if (!repoId) return;
+		if (pill.kind === "tag") return; // tags aren't checked out from a double-click (v1).
+		if (pill.isRemoteOnly && pill.remoteRef) {
+			void actions.checkoutRemote(repoId, pill.remoteRef);
+		} else if (pill.localBranch) {
+			void actions.checkoutBranch(repoId, pill.localBranch);
+		}
+	}
+
+	function handlePillBadge(pill: Pill, x: number, y: number) {
+		badgePopover = { pill, x, y };
+	}
+
+	function handlePillMenu(pill: Pill, x: number, y: number) {
+		branchMenu = { pill, x, y };
+	}
+
+	/** A dragged pill was dropped onto pill `target`. */
+	function handlePillDrop(target: Pill) {
+		const source = dnd.source;
+		if (!source || source.key === target.key) return;
+		dropMenu = { source, targetPill: target, targetSha: target.sha, x: dnd.x, y: dnd.y };
+	}
+
+	/** A dragged pill was dropped onto a bare commit row `sha`. */
+	function handleRowDrop(sha: string) {
+		const source = dnd.source;
+		if (!source || source.sha === sha) return;
+		dropMenu = { source, targetPill: null, targetSha: sha, x: dnd.x, y: dnd.y };
+	}
+
+	function startCreateBranch(sha: string) {
+		branchEdit.startCreate(sha);
+	}
+
+	function startRename(pill: Pill) {
+		if (pill.localBranch) branchEdit.startRename(pill.localBranch, pill.sha);
 	}
 
 	// Redraw whenever the data, layout, hover or scroll offset changes; rAF coalesces bursts.
@@ -398,6 +467,13 @@
 	$effect(() => {
 		const { start, end } = range;
 		if (graph.repoId) void graph.ensureMetadataForWindow(start, end);
+	});
+
+	// Flash-scroll to a commit on request (panel click-to-tip, badge "view commits", merge "View").
+	$effect(() => {
+		void graphNav.scrollToken;
+		const sha = graphNav.scrollSha;
+		if (sha) scrollShaIntoView(sha);
 	});
 
 	// Rebuild the sha→index map on topology reloads and restore the viewport to the anchored sha so
@@ -432,6 +508,11 @@
 			anchor = { sha: null, offset: 0 };
 			hoveredSha = null;
 			popover = null;
+			badgePopover = null;
+			branchMenu = null;
+			dropMenu = null;
+			branchEdit.cancel();
+			dnd.end();
 			if (scrollEl) scrollEl.scrollTop = 0;
 			scrollTop = 0;
 			graphSelection.clear();
@@ -457,8 +538,10 @@
 			Detached at <code>{headSha.slice(0, 7)}</code> — changes here can be lost.
 		</span>
 		<div class="banner-actions">
-			<button type="button" onclick={() => onCreateBranch?.(headSha)}>Create branch here</button>
-			<button type="button" onclick={() => onBackToBranch?.()}>Back to branch</button>
+			<button type="button" onclick={() => startCreateBranch(headSha)}>Create branch here</button>
+			<button type="button" onclick={() => repoId && actions.backToPrevious(repoId)}>
+				Back to branch
+			</button>
 		</div>
 	</div>
 {/if}
@@ -498,12 +581,19 @@
 						{#each visibleRows as row (row.sha)}
 							<GraphRow
 								{row}
+								{repoId}
 								selected={graphSelection.selectedSha === row.sha}
 								head={row.sha === headSha}
 								onSelect={handleSelect}
 								onActivate={handleActivate}
 								onHover={(sha) => (hoveredSha = sha)}
 								onCopySha={handleCopySha}
+								onPillSelect={handlePillSelect}
+								onPillCheckout={handlePillCheckout}
+								onPillBadge={handlePillBadge}
+								onPillMenu={handlePillMenu}
+								onPillDrop={handlePillDrop}
+								onRowDrop={handleRowDrop}
 							/>
 						{/each}
 					</div>
@@ -518,9 +608,47 @@
 		sha={popover.sha}
 		x={popover.x}
 		y={popover.y}
-		onCheckout={(sha) => onCheckout?.(sha)}
-		onCreateBranch={(sha) => onCreateBranch?.(sha)}
+		onCheckout={(sha) => repoId && actions.checkoutDetached(repoId, sha)}
+		onCreateBranch={(sha) => startCreateBranch(sha)}
 		onDismiss={() => (popover = null)}
+	/>
+{/if}
+
+{#if badgePopover && repoId}
+	<AheadBehindPopover
+		pill={badgePopover.pill}
+		{repoId}
+		x={badgePopover.x}
+		y={badgePopover.y}
+		isCurrent={badgePopover.pill.localBranch !== null &&
+			badgePopover.pill.localBranch === currentBranch}
+		onDismiss={() => (badgePopover = null)}
+	/>
+{/if}
+
+{#if branchMenu && repoId}
+	<BranchMenu
+		pill={branchMenu.pill}
+		{repoId}
+		{currentBranch}
+		x={branchMenu.x}
+		y={branchMenu.y}
+		onDismiss={() => (branchMenu = null)}
+		onRename={startRename}
+		onCreateBranch={startCreateBranch}
+	/>
+{/if}
+
+{#if dropMenu && repoId}
+	<DropMenu
+		source={dropMenu.source}
+		targetPill={dropMenu.targetPill}
+		targetSha={dropMenu.targetSha}
+		{repoId}
+		{currentBranch}
+		x={dropMenu.x}
+		y={dropMenu.y}
+		onDismiss={() => (dropMenu = null)}
 	/>
 {/if}
 

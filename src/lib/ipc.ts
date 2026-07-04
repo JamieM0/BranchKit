@@ -4,11 +4,13 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   ChangeKind,
   CommitMeta,
+  Divergence,
   GitIdentity,
   GraphTopologyRow,
   RecentRepo,
   RefsResponse,
   RepoInfo,
+  WorktreeInfo,
 } from "./types";
 
 /** The ONLY place invoke() is called — ARCHITECTURE.md §1. */
@@ -55,6 +57,93 @@ export async function getCommitMeta(repoId: string, shas: string[]): Promise<Com
 
 export async function getRefs(repoId: string): Promise<RefsResponse> {
   return invoke("get_refs", { repoId });
+}
+
+export async function getWorktrees(repoId: string): Promise<WorktreeInfo[]> {
+  return invoke("get_worktrees", { repoId });
+}
+
+// --- mutations (ARCHITECTURE.md §7.1) — each runs through the repo op queue in Rust and emits its
+// own targeted refresh event on success. ---
+
+export async function checkoutBranch(repoId: string, name: string): Promise<void> {
+  return invoke("checkout_branch", { repoId, name });
+}
+
+/** Create-tracking-branch-and-checkout in one action; resolves to the new local branch name. */
+export async function checkoutRemote(repoId: string, remoteRef: string): Promise<string> {
+  return invoke("checkout_remote", { repoId, remoteRef });
+}
+
+export async function checkoutPrevious(repoId: string): Promise<void> {
+  return invoke("checkout_previous", { repoId });
+}
+
+export async function checkoutDetached(repoId: string, sha: string): Promise<void> {
+  return invoke("checkout_detached", { repoId, sha });
+}
+
+export async function createBranch(
+  repoId: string,
+  name: string,
+  sha: string | null,
+  checkout: boolean,
+): Promise<void> {
+  return invoke("create_branch", { repoId, name, sha, checkout });
+}
+
+export async function renameBranch(
+  repoId: string,
+  oldName: string,
+  newName: string,
+): Promise<void> {
+  return invoke("rename_branch", { repoId, oldName, newName });
+}
+
+/** Deletes a branch; resolves to its recorded tip sha so a toast can Undo (recreate at it). */
+export async function deleteBranch(repoId: string, name: string, force: boolean): Promise<string> {
+  return invoke("delete_branch", { repoId, name, force });
+}
+
+export async function recreateBranch(repoId: string, name: string, sha: string): Promise<void> {
+  return invoke("recreate_branch", { repoId, name, sha });
+}
+
+export async function mergeRef(repoId: string, source: string): Promise<void> {
+  return invoke("merge_ref", { repoId, source });
+}
+
+export async function rebaseOnto(repoId: string, onto: string): Promise<void> {
+  return invoke("rebase_onto", { repoId, onto });
+}
+
+export async function fastForward(
+  repoId: string,
+  branch: string,
+  source: string,
+  isCurrent: boolean,
+): Promise<void> {
+  return invoke("fast_forward", { repoId, branch, source, isCurrent });
+}
+
+export async function pull(repoId: string, mode: "ff" | "rebase" | "merge"): Promise<void> {
+  return invoke("pull", { repoId, mode });
+}
+
+export async function push(repoId: string, force: boolean): Promise<void> {
+  return invoke("push", { repoId, force });
+}
+
+export async function setUpstream(
+  repoId: string,
+  branch: string,
+  upstream: string,
+): Promise<void> {
+  return invoke("set_upstream", { repoId, branch, upstream });
+}
+
+export async function branchDivergence(repoId: string, branch: string): Promise<Divergence> {
+  return invoke("branch_divergence", { repoId, branch });
 }
 
 /** Subscribes to `repo://{id}/changed` — ARCHITECTURE.md §2. Returns the unlisten function. */

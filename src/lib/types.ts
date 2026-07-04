@@ -107,6 +107,33 @@ export interface RefsResponse {
 	head: HeadInfo;
 }
 
+// --- git/ops.rs ---------------------------------------------------------
+
+export interface CommitLine {
+	sha: string;
+	subject: string;
+}
+
+export interface Divergence {
+	/** `↑` commits to push (ahead of upstream). */
+	outgoing: CommitLine[];
+	/** `↓` commits to pull (behind upstream). */
+	incoming: CommitLine[];
+}
+
+// --- git/worktree.rs ---------------------------------------------------------
+
+export interface WorktreeInfo {
+	path: string;
+	/** Short branch name, or `null` when the worktree is detached. */
+	branch: string | null;
+	head: string;
+	detached: boolean;
+	/** The main (non-linked) worktree — can't be removed. */
+	isMain: boolean;
+	locked: boolean;
+}
+
 // --- git/status.rs ---------------------------------------------------------
 
 export type FileStatusCode =

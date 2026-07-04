@@ -30,6 +30,22 @@ pub fn run() {
             git::log::get_graph,
             git::log::get_commit_meta,
             git::refs::get_refs,
+            git::worktree::get_worktrees,
+            git::ops::checkout_branch,
+            git::ops::checkout_remote,
+            git::ops::checkout_previous,
+            git::ops::checkout_detached,
+            git::ops::create_branch,
+            git::ops::rename_branch,
+            git::ops::delete_branch,
+            git::ops::recreate_branch,
+            git::ops::merge_ref,
+            git::ops::rebase_onto,
+            git::ops::fast_forward,
+            git::ops::pull,
+            git::ops::push,
+            git::ops::set_upstream,
+            git::ops::branch_divergence,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
