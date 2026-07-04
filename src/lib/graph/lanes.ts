@@ -13,6 +13,27 @@ export interface GraphNodeOp {
 	colorIndex: number;
 }
 
+/**
+ * A drawable connection crossing a single row's vertical band — ARCHITECTURE.md §5.4. Unlike
+ * {@link GraphEdgeOp} (which only records the commit's own parent/child connections and is what the
+ * lane snapshot tests assert), segments also include the lanes that merely *pass through* a row, so
+ * the canvas can draw continuous lane lines without replaying the algorithm. Each end sits on the
+ * row's top boundary, its bottom boundary, or the commit node at the row centre; adjacent rows
+ * share boundaries, so per-row segments join into unbroken lines.
+ */
+export type SegmentEnd =
+	| { at: "top"; lane: number }
+	| { at: "node" }
+	| { at: "bottom"; lane: number };
+
+export interface GraphSegment {
+	from: SegmentEnd;
+	to: SegmentEnd;
+	colorIndex: number;
+	/** Dashed offshoot — the stash connector (DESIGN_SPEC.md §4.5). */
+	dashed?: boolean;
+}
+
 export type GraphLaneRow =
 	| {
 			kind: "commit";
@@ -20,6 +41,7 @@ export type GraphLaneRow =
 			parents: string[];
 			node: GraphNodeOp;
 			edges: GraphEdgeOp[];
+			segments: GraphSegment[];
 	  }
 	| {
 			kind: "stash";
@@ -29,6 +51,7 @@ export type GraphLaneRow =
 			subject: string;
 			node: GraphNodeOp;
 			edges: GraphEdgeOp[];
+			segments: GraphSegment[];
 	  };
 
 export interface LaneAssignment {
@@ -54,6 +77,14 @@ function compactTrailingNulls(lanes: (string | null)[]) {
 	while (lanes.at(-1) === null) lanes.pop();
 }
 
+function through(lane: number): GraphSegment {
+	return {
+		from: { at: "top", lane },
+		to: { at: "bottom", lane },
+		colorIndex: laneColorIndex(lane),
+	};
+}
+
 export function assignLanes(topology: readonly GraphTopologyRow[]): LaneAssignment {
 	const lanes: (string | null)[] = [];
 	const commitLanes = new Map<string, number>();
@@ -64,14 +95,28 @@ export function assignLanes(topology: readonly GraphTopologyRow[]): LaneAssignme
 		if (row.kind === "stash") {
 			const lane = commitLanes.get(row.baseSha) ?? 0;
 			maxLane = Math.max(maxLane, lane);
+			// Every active lane runs straight through the stash pseudo-row; the stash itself hangs off
+			// its base commit (directly above) on a short dashed connector.
+			const segments: GraphSegment[] = [];
+			for (let i = 0; i < lanes.length; i += 1) {
+				if (lanes[i] !== null) segments.push(through(i));
+			}
+			segments.push({
+				from: { at: "top", lane },
+				to: { at: "node" },
+				colorIndex: laneColorIndex(lane),
+				dashed: true,
+			});
 			rows.push({
 				...row,
 				node: { lane, colorIndex: laneColorIndex(lane) },
 				edges: [],
+				segments,
 			});
 			continue;
 		}
 
+		const before = lanes.slice();
 		const expecting: number[] = [];
 		for (let i = 0; i < lanes.length; i += 1) {
 			if (lanes[i] === row.sha) expecting.push(i);
@@ -102,6 +147,7 @@ export function assignLanes(topology: readonly GraphTopologyRow[]): LaneAssignme
 			edges.push({ fromLane: lane, toLane: lane, kind: "pass" });
 		}
 
+		const mergeParentLanes: number[] = [];
 		for (const parent of otherParents) {
 			let parentLane = lanes.indexOf(parent);
 			if (parentLane === -1) {
@@ -110,15 +156,46 @@ export function assignLanes(topology: readonly GraphTopologyRow[]): LaneAssignme
 			}
 			maxLane = Math.max(maxLane, parentLane);
 			edges.push({ fromLane: lane, toLane: parentLane, kind: "merge" });
+			mergeParentLanes.push(parentLane);
 		}
 
 		compactTrailingNulls(lanes);
+
+		// Render segments: incoming lanes fold into the node, unrelated lanes pass straight through
+		// at a stable index, and the node's parents fan out toward the bottom boundary.
+		const segments: GraphSegment[] = [];
+		for (const i of expecting) {
+			segments.push({
+				from: { at: "top", lane: i },
+				to: { at: "node" },
+				colorIndex: laneColorIndex(i),
+			});
+		}
+		for (let i = 0; i < before.length; i += 1) {
+			if (before[i] !== null && before[i] !== row.sha) segments.push(through(i));
+		}
+		if (firstParent) {
+			segments.push({
+				from: { at: "node" },
+				to: { at: "bottom", lane },
+				colorIndex: laneColorIndex(lane),
+			});
+		}
+		for (const parentLane of mergeParentLanes) {
+			segments.push({
+				from: { at: "node" },
+				to: { at: "bottom", lane: parentLane },
+				colorIndex: laneColorIndex(parentLane),
+			});
+		}
+
 		rows.push({
 			kind: "commit",
 			sha: row.sha,
 			parents: row.parents,
 			node: { lane, colorIndex: laneColorIndex(lane) },
 			edges,
+			segments,
 		});
 	}
 

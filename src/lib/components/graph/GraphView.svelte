@@ -1,0 +1,667 @@
+<script lang="ts">
+	import GraphColumnHeader from "./GraphColumnHeader.svelte";
+	import GraphRow from "./GraphRow.svelte";
+	import DetachGuardPopover from "./DetachGuardPopover.svelte";
+	import {
+		anchoredScrollTop,
+		AVATAR_RADIUS,
+		laneCenterX,
+		MERGE_NODE_RADIUS,
+		ROW_HEIGHT,
+		STASH_NODE_RADIUS,
+		totalHeight,
+		visibleRowRange,
+	} from "$lib/graph/geometry";
+	import { AvatarCache, authorInitials, discColorIndex } from "$lib/graph/avatars";
+	import type { GraphSegment, SegmentEnd } from "$lib/graph/lanes";
+	import { graph } from "$lib/stores/graph.svelte";
+	import { graphSelection } from "$lib/stores/graphSelection.svelte";
+	import { graphView } from "$lib/stores/graphView.svelte";
+	import { theme } from "$lib/stores/theme.svelte";
+	import { isModEvent } from "$lib/platform";
+
+	/** The commit graph — DESIGN_SPEC.md §4, ARCHITECTURE.md §5.4. Hand-rolled virtualized DOM rows
+	 * over a single background canvas that draws edges/nodes/avatars for the visible range only,
+	 * redrawn via rAF on scroll. Git mutations (checkout, create branch, back-to-branch, open diff)
+	 * are emitted as intents; they get wired to the op queue in later prompts. */
+	let {
+		onSelectCommit,
+		onCompare,
+		onCheckout,
+		onCreateBranch,
+		onOpenCommit,
+		onBackToBranch,
+	}: {
+		onSelectCommit?: (sha: string) => void;
+		onCompare?: (a: string, b: string) => void;
+		onCheckout?: (sha: string) => void;
+		onCreateBranch?: (sha: string) => void;
+		onOpenCommit?: (sha: string) => void;
+		onBackToBranch?: () => void;
+	} = $props();
+
+	const CANVAS_FONT_FAMILY = '-apple-system, "Segoe UI", Ubuntu, sans-serif';
+
+	interface Colors {
+		lanes: string[];
+		accent: string;
+		bg: string;
+		surface: string;
+		muted: string;
+	}
+
+	let scrollEl: HTMLDivElement | null = $state(null);
+	let bodyEl: HTMLDivElement | null = $state(null);
+	let canvasEl: HTMLCanvasElement | null = $state(null);
+
+	let scrollTop = $state(0);
+	let viewportHeight = $state(0);
+	let hoveredSha = $state<string | null>(null);
+	let popover = $state<{ sha: string; x: number; y: number } | null>(null);
+
+	// Non-reactive scratch state used only inside the canvas draw / anchoring.
+	let shaIndex = new Map<string, number>();
+	let anchor: { sha: string | null; offset: number } = { sha: null, offset: 0 };
+	let lastCompute = -1;
+	let lastRepo: string | null = null;
+	let rafId = 0;
+	let colorsCache: Colors | null = null;
+	let colorsTheme = "";
+
+	const avatars = new AvatarCache(() => requestDraw());
+
+	const rows = $derived(graph.rows);
+	const range = $derived(visibleRowRange(scrollTop, viewportHeight, rows.length));
+	const visibleRows = $derived(rows.slice(range.start, range.end));
+	const headSha = $derived(graph.head?.sha ?? null);
+	const detached = $derived(graph.head?.detached ?? false);
+	const showSkeleton = $derived(graph.loading && rows.length === 0);
+	const showEmpty = $derived(!graph.loading && rows.length === 0 && graph.repoId !== null);
+
+	function requestDraw() {
+		if (rafId) return;
+		rafId = requestAnimationFrame(() => {
+			rafId = 0;
+			draw();
+		});
+	}
+
+	function readColors(): Colors {
+		const s = getComputedStyle(document.documentElement);
+		const v = (name: string) => s.getPropertyValue(name).trim();
+		return {
+			lanes: Array.from({ length: 8 }, (_, i) => v(`--lane-${i}`)),
+			accent: v("--accent"),
+			bg: v("--bg"),
+			surface: v("--surface"),
+			muted: v("--text-muted"),
+		};
+	}
+
+	function colors(): Colors {
+		const t = theme.resolved;
+		if (!colorsCache || colorsTheme !== t) {
+			colorsCache = readColors();
+			colorsTheme = t;
+		}
+		return colorsCache;
+	}
+
+	function endpoint(end: SegmentEnd, graphLeft: number, yTop: number, yMid: number, yBot: number, nodeLane: number) {
+		if (end.at === "node") return { x: graphLeft + laneCenterX(nodeLane), y: yMid };
+		const y = end.at === "top" ? yTop : yBot;
+		return { x: graphLeft + laneCenterX(end.lane), y };
+	}
+
+	/** `${rowIndex}:${lane}` keys covering the first-parent chain below `sha` — the lit lineage on
+	 * hover (DESIGN_SPEC.md §4.3). Runs of a lane between a commit and its first parent are lit so the
+	 * ancestry line brightens while everything else dims. */
+	function lineageKeys(sha: string): Set<string> {
+		const lit = new Set<string>();
+		const laneRows = graph.laneRows;
+		let idx = shaIndex.get(sha);
+		let guard = 0;
+		while (idx !== undefined && guard++ < laneRows.length + 1) {
+			const row = laneRows[idx];
+			if (!row) break;
+			lit.add(`${idx}:${row.node.lane}`);
+			const parent = row.kind === "commit" ? row.parents[0] : undefined;
+			const pIdx = parent !== undefined ? shaIndex.get(parent) : undefined;
+			if (pIdx === undefined) break;
+			for (let r = idx + 1; r < pIdx; r += 1) lit.add(`${r}:${row.node.lane}`);
+			idx = pIdx;
+		}
+		return lit;
+	}
+
+	function segmentLane(seg: GraphSegment, nodeLane: number): number {
+		if (seg.to.at === "bottom") return seg.to.lane;
+		if (seg.from.at === "top") return seg.from.lane;
+		return nodeLane;
+	}
+
+	function drawInitialsDisc(
+		ctx: CanvasRenderingContext2D,
+		x: number,
+		y: number,
+		r: number,
+		colorIndex: number,
+		text: string,
+		c: Colors,
+	) {
+		ctx.beginPath();
+		ctx.arc(x, y, r, 0, Math.PI * 2);
+		ctx.fillStyle = c.lanes[colorIndex] ?? c.accent;
+		ctx.fill();
+		ctx.fillStyle = c.bg;
+		ctx.font = `600 ${Math.round(r * 0.85)}px ${CANVAS_FONT_FAMILY}`;
+		ctx.textAlign = "center";
+		ctx.textBaseline = "middle";
+		ctx.fillText(text, x, y + 0.5);
+	}
+
+	function drawNode(ctx: CanvasRenderingContext2D, row: (typeof rows)[number], x: number, y: number, c: Colors) {
+		// A background halo so lane lines don't cut across the node.
+		const haloR = row.kind === "stash" ? STASH_NODE_RADIUS + 2 : AVATAR_RADIUS + 1;
+		ctx.beginPath();
+		ctx.arc(x, y, haloR, 0, Math.PI * 2);
+		ctx.fillStyle = c.bg;
+		ctx.fill();
+
+		if (row.kind === "stash") {
+			ctx.beginPath();
+			ctx.rect(x - STASH_NODE_RADIUS, y - STASH_NODE_RADIUS, STASH_NODE_RADIUS * 2, STASH_NODE_RADIUS * 2);
+			ctx.fillStyle = c.surface;
+			ctx.fill();
+			ctx.strokeStyle = c.muted;
+			ctx.lineWidth = 1.5;
+			ctx.stroke();
+			return;
+		}
+
+		const isMerge = row.parents.length > 1;
+		if (isMerge) {
+			// Smaller plain node for merges — DESIGN_SPEC.md §4.3.
+			ctx.beginPath();
+			ctx.arc(x, y, MERGE_NODE_RADIUS, 0, Math.PI * 2);
+			ctx.fillStyle = c.lanes[row.node.colorIndex] ?? c.accent;
+			ctx.fill();
+		} else {
+			const bitmap = row.meta ? avatars.get(row.meta.authorEmail) : null;
+			if (bitmap) {
+				ctx.save();
+				ctx.beginPath();
+				ctx.arc(x, y, AVATAR_RADIUS, 0, Math.PI * 2);
+				ctx.clip();
+				ctx.drawImage(bitmap, x - AVATAR_RADIUS, y - AVATAR_RADIUS, AVATAR_RADIUS * 2, AVATAR_RADIUS * 2);
+				ctx.restore();
+				ctx.beginPath();
+				ctx.arc(x, y, AVATAR_RADIUS, 0, Math.PI * 2);
+				ctx.strokeStyle = c.surface;
+				ctx.lineWidth = 1;
+				ctx.stroke();
+			} else if (row.meta) {
+				drawInitialsDisc(
+					ctx,
+					x,
+					y,
+					AVATAR_RADIUS,
+					discColorIndex(row.meta.authorEmail),
+					authorInitials(row.meta.authorName, row.meta.authorEmail),
+					c,
+				);
+			} else {
+				ctx.beginPath();
+				ctx.arc(x, y, AVATAR_RADIUS - 3, 0, Math.PI * 2);
+				ctx.fillStyle = c.lanes[row.node.colorIndex] ?? c.accent;
+				ctx.fill();
+			}
+		}
+
+		if (row.sha === headSha) {
+			ctx.beginPath();
+			ctx.arc(x, y, AVATAR_RADIUS + 2.5, 0, Math.PI * 2);
+			ctx.strokeStyle = c.accent;
+			ctx.lineWidth = 2;
+			ctx.stroke();
+		}
+	}
+
+	function draw() {
+		const canvas = canvasEl;
+		if (!canvas) return;
+		const ctx = canvas.getContext("2d");
+		if (!ctx) return;
+		const dpr = window.devicePixelRatio || 1;
+		const cssW = canvas.clientWidth;
+		const cssH = canvas.clientHeight;
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+		ctx.clearRect(0, 0, cssW, cssH);
+
+		const allRows = graph.rows;
+		const st = scrollEl ? scrollEl.scrollTop : scrollTop;
+		const win = visibleRowRange(st, cssH, allRows.length);
+		const c = colors();
+		const graphLeft = graphView.widths.branch;
+
+		ctx.save();
+		ctx.beginPath();
+		ctx.rect(graphLeft, 0, graphView.widths.graph, cssH);
+		ctx.clip();
+
+		const lit = hoveredSha ? lineageKeys(hoveredSha) : null;
+
+		// Pass 1: lane lines. Drawn before nodes so avatars sit on top.
+		ctx.lineWidth = 1.6;
+		for (let i = win.start; i < win.end; i += 1) {
+			const row = allRows[i];
+			const yTop = i * ROW_HEIGHT - st;
+			const yMid = yTop + ROW_HEIGHT / 2;
+			const yBot = yTop + ROW_HEIGHT;
+			for (const seg of row.segments) {
+				const p1 = endpoint(seg.from, graphLeft, yTop, yMid, yBot, row.node.lane);
+				const p2 = endpoint(seg.to, graphLeft, yTop, yMid, yBot, row.node.lane);
+				let alpha = hoveredSha ? 0.3 : 0.9;
+				if (lit && lit.has(`${i}:${segmentLane(seg, row.node.lane)}`)) alpha = 1;
+				ctx.globalAlpha = alpha;
+				ctx.strokeStyle = c.lanes[seg.colorIndex] ?? c.muted;
+				ctx.setLineDash(seg.dashed ? [2, 3] : []);
+				ctx.beginPath();
+				ctx.moveTo(p1.x, p1.y);
+				if (Math.abs(p1.x - p2.x) < 0.5) {
+					ctx.lineTo(p2.x, p2.y);
+				} else {
+					const midY = (p1.y + p2.y) / 2;
+					ctx.bezierCurveTo(p1.x, midY, p2.x, midY, p2.x, p2.y);
+				}
+				ctx.stroke();
+			}
+		}
+		ctx.setLineDash([]);
+		ctx.globalAlpha = 1;
+
+		// Pass 2: nodes + avatars.
+		for (let i = win.start; i < win.end; i += 1) {
+			const row = allRows[i];
+			const yMid = i * ROW_HEIGHT - st + ROW_HEIGHT / 2;
+			drawNode(ctx, row, graphLeft + laneCenterX(row.node.lane), yMid, c);
+		}
+
+		ctx.restore();
+	}
+
+	function resizeCanvas() {
+		if (!canvasEl || !bodyEl) return;
+		const rect = bodyEl.getBoundingClientRect();
+		viewportHeight = rect.height;
+		const dpr = window.devicePixelRatio || 1;
+		canvasEl.width = Math.max(1, Math.round(rect.width * dpr));
+		canvasEl.height = Math.max(1, Math.round(rect.height * dpr));
+		canvasEl.style.width = `${rect.width}px`;
+		canvasEl.style.height = `${rect.height}px`;
+		requestDraw();
+	}
+
+	function onScroll() {
+		if (!scrollEl) return;
+		const st = scrollEl.scrollTop;
+		scrollTop = st;
+		const topIndex = Math.floor(st / ROW_HEIGHT);
+		const row = graph.rows[topIndex];
+		anchor = { sha: row?.sha ?? null, offset: st - topIndex * ROW_HEIGHT };
+		requestDraw();
+	}
+
+	function scrollRowIntoView(idx: number) {
+		if (!scrollEl) return;
+		const top = idx * ROW_HEIGHT;
+		const bottom = top + ROW_HEIGHT;
+		if (top < scrollEl.scrollTop) {
+			scrollEl.scrollTop = top;
+		} else if (bottom > scrollEl.scrollTop + viewportHeight) {
+			scrollEl.scrollTop = bottom - viewportHeight;
+		}
+		scrollTop = scrollEl.scrollTop;
+	}
+
+	function moveSelection(delta: number) {
+		const allRows = graph.rows;
+		if (allRows.length === 0) return;
+		const current = graphSelection.selectedSha ? shaIndex.get(graphSelection.selectedSha) : undefined;
+		let idx = current === undefined ? (delta > 0 ? 0 : allRows.length - 1) : current + delta;
+		idx = Math.max(0, Math.min(allRows.length - 1, idx));
+		const sha = allRows[idx].sha;
+		graphSelection.select(sha);
+		onSelectCommit?.(sha);
+		scrollRowIntoView(idx);
+	}
+
+	function onKeydown(e: KeyboardEvent) {
+		const key = e.key;
+		if (key === "ArrowDown" || key === "j") {
+			e.preventDefault();
+			moveSelection(1);
+		} else if (key === "ArrowUp" || key === "k") {
+			e.preventDefault();
+			moveSelection(-1);
+		} else if (key === "Enter") {
+			if (graphSelection.selectedSha) {
+				e.preventDefault();
+				onOpenCommit?.(graphSelection.selectedSha);
+			}
+		}
+	}
+
+	function handleSelect(sha: string, e: MouseEvent) {
+		scrollEl?.focus();
+		if (isModEvent(e)) {
+			const previous = graphSelection.selectedSha;
+			graphSelection.toggleCompare(sha);
+			if (graphSelection.compare && previous) onCompare?.(previous, sha);
+		} else {
+			graphSelection.select(sha);
+			onSelectCommit?.(sha);
+		}
+	}
+
+	function handleActivate(sha: string, e: MouseEvent) {
+		const row = graph.rows[shaIndex.get(sha) ?? -1];
+		if (row?.kind === "stash") return; // Pop-with-undo arrives with the stash menu (prompt 11).
+		if (graphView.detachDontAsk) {
+			onCheckout?.(sha);
+			return;
+		}
+		popover = { sha, x: e.clientX, y: e.clientY };
+	}
+
+	async function handleCopySha(sha: string) {
+		try {
+			await navigator.clipboard?.writeText(sha);
+		} catch {
+			/* clipboard unavailable — best effort */
+		}
+	}
+
+	// Redraw whenever the data, layout, hover or scroll offset changes; rAF coalesces bursts.
+	$effect(() => {
+		void graph.rows;
+		void graph.metaBySha;
+		void graphView.widths.branch;
+		void graphView.widths.graph;
+		void hoveredSha;
+		void scrollTop;
+		void theme.resolved;
+		requestDraw();
+	});
+
+	// Lazy-load metadata for the visible window (+ overscan) — ARCHITECTURE.md §5.1.
+	$effect(() => {
+		const { start, end } = range;
+		if (graph.repoId) void graph.ensureMetadataForWindow(start, end);
+	});
+
+	// Rebuild the sha→index map on topology reloads and restore the viewport to the anchored sha so
+	// refreshes never move what you're looking at — DESIGN_SPEC.md §4.7 / §15.32.
+	$effect(() => {
+		const laneRows = graph.laneRows;
+		const cc = graph.laneComputeCount;
+		const map = new Map<string, number>();
+		for (let i = 0; i < laneRows.length; i += 1) map.set(laneRows[i].sha, i);
+		shaIndex = map;
+		if (cc !== lastCompute) {
+			const previous = lastCompute;
+			lastCompute = cc;
+			if (previous !== -1 && anchor.sha && scrollEl) {
+				const idx = map.get(anchor.sha);
+				if (idx !== undefined) {
+					const top = anchoredScrollTop(idx, anchor.offset);
+					scrollEl.scrollTop = top;
+					scrollTop = top;
+				}
+			}
+		}
+		requestDraw();
+	});
+
+	// Reset transient view state when the repo changes under us.
+	$effect(() => {
+		const id = graph.repoId;
+		if (id !== lastRepo) {
+			lastRepo = id;
+			lastCompute = -1;
+			anchor = { sha: null, offset: 0 };
+			hoveredSha = null;
+			popover = null;
+			if (scrollEl) scrollEl.scrollTop = 0;
+			scrollTop = 0;
+			graphSelection.clear();
+		}
+	});
+
+	// Size the canvas to the body and keep it sized.
+	$effect(() => {
+		if (!bodyEl) return;
+		resizeCanvas();
+		const observer = new ResizeObserver(() => resizeCanvas());
+		observer.observe(bodyEl);
+		return () => observer.disconnect();
+	});
+
+	// Release decoded avatars on unmount.
+	$effect(() => () => avatars.dispose());
+</script>
+
+{#if detached && headSha}
+	<div class="banner" role="status">
+		<span class="banner-text">
+			Detached at <code>{headSha.slice(0, 7)}</code> — changes here can be lost.
+		</span>
+		<div class="banner-actions">
+			<button type="button" onclick={() => onCreateBranch?.(headSha)}>Create branch here</button>
+			<button type="button" onclick={() => onBackToBranch?.()}>Back to branch</button>
+		</div>
+	</div>
+{/if}
+
+<div class="graph-view">
+	<GraphColumnHeader />
+
+	<div class="graph-body" bind:this={bodyEl}>
+		<canvas class="graph-canvas" bind:this={canvasEl} aria-hidden="true"></canvas>
+
+		{#if showSkeleton}
+			<div class="skeleton" aria-hidden="true">
+				{#each Array(24) as _, i (i)}
+					<div class="skeleton-row" style="height: {ROW_HEIGHT}px;">
+						<span class="shimmer node"></span>
+						<span class="shimmer bar" style="width: {40 + ((i * 37) % 45)}%;"></span>
+					</div>
+				{/each}
+			</div>
+		{:else if showEmpty}
+			<div class="empty">
+				<p>No commits yet — stage files and make the first one.</p>
+			</div>
+		{:else}
+			<div
+				class="graph-scroll"
+				bind:this={scrollEl}
+				tabindex="0"
+				role="grid"
+				aria-label="Commit graph"
+				aria-rowcount={rows.length}
+				onscroll={onScroll}
+				onkeydown={onKeydown}
+			>
+				<div class="graph-spacer" style="height: {totalHeight(rows.length)}px;">
+					<div class="graph-rows" style="transform: translateY({range.start * ROW_HEIGHT}px);">
+						{#each visibleRows as row (row.sha)}
+							<GraphRow
+								{row}
+								selected={graphSelection.selectedSha === row.sha}
+								head={row.sha === headSha}
+								onSelect={handleSelect}
+								onActivate={handleActivate}
+								onHover={(sha) => (hoveredSha = sha)}
+								onCopySha={handleCopySha}
+							/>
+						{/each}
+					</div>
+				</div>
+			</div>
+		{/if}
+	</div>
+</div>
+
+{#if popover}
+	<DetachGuardPopover
+		sha={popover.sha}
+		x={popover.x}
+		y={popover.y}
+		onCheckout={(sha) => onCheckout?.(sha)}
+		onCreateBranch={(sha) => onCreateBranch?.(sha)}
+		onDismiss={() => (popover = null)}
+	/>
+{/if}
+
+<style>
+	.graph-view {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		min-height: 0;
+		background: var(--bg);
+	}
+
+	.banner {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-3);
+		padding: var(--space-2) var(--space-3);
+		background: color-mix(in srgb, var(--warn) 16%, var(--surface));
+		border-bottom: 1px solid var(--warn);
+		font-size: 12px;
+		color: var(--text);
+	}
+
+	.banner code {
+		font-family: var(--font-mono);
+		color: var(--warn);
+	}
+
+	.banner-actions {
+		display: flex;
+		gap: var(--space-2);
+		flex-shrink: 0;
+	}
+
+	.banner-actions button {
+		padding: 3px var(--space-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-control);
+		background: var(--raised);
+		color: var(--text);
+		font: inherit;
+		font-size: 11px;
+		cursor: pointer;
+	}
+
+	.banner-actions button:hover {
+		background: var(--overlay);
+	}
+
+	.graph-body {
+		position: relative;
+		flex: 1;
+		min-height: 0;
+		overflow: hidden;
+	}
+
+	.graph-canvas {
+		position: absolute;
+		inset: 0;
+		z-index: 0;
+		pointer-events: none;
+	}
+
+	.graph-scroll {
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+		overflow-y: auto;
+		overflow-x: hidden;
+		outline: none;
+	}
+
+	.graph-scroll:focus-visible {
+		box-shadow: inset 0 0 0 2px var(--accent);
+	}
+
+	.graph-spacer {
+		position: relative;
+		width: 100%;
+	}
+
+	.graph-rows {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		will-change: transform;
+	}
+
+	.skeleton {
+		position: absolute;
+		inset: 0;
+		padding-top: var(--space-1);
+	}
+
+	.skeleton-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		padding: 0 var(--space-4);
+	}
+
+	.shimmer {
+		background: linear-gradient(90deg, var(--surface) 25%, var(--raised) 50%, var(--surface) 75%);
+		background-size: 200% 100%;
+		animation: shimmer 1.4s linear infinite;
+		border-radius: var(--radius-control);
+	}
+
+	.shimmer.node {
+		width: 14px;
+		height: 14px;
+		border-radius: var(--radius-pill);
+		margin-left: 200px;
+		flex-shrink: 0;
+	}
+
+	.shimmer.bar {
+		height: 8px;
+	}
+
+	@keyframes shimmer {
+		to {
+			background-position: -200% 0;
+		}
+	}
+
+	.empty {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--text-muted);
+		font-size: 13px;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.shimmer {
+			animation: none;
+		}
+	}
+</style>

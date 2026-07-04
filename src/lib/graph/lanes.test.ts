@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assignLanes } from "./lanes";
+import { assignLanes, type GraphLaneRow, type SegmentEnd } from "./lanes";
 import type { GraphTopologyRow } from "$lib/types";
 
 function commit(sha: string, parents: string[] = []): GraphTopologyRow {
@@ -433,6 +433,90 @@ describe("assignLanes", () => {
 			  },
 			]
 		`);
+	});
+
+	// The canvas draws per-row segments; for lines to join across rows, the set of lanes leaving a
+	// row's bottom boundary must equal the set entering the next row's top boundary.
+	function boundaryLanes(row: GraphLaneRow, at: "top" | "bottom"): Set<number> {
+		const lanes = new Set<number>();
+		const collect = (end: SegmentEnd) => {
+			if (end.at === at) lanes.add(end.lane);
+		};
+		for (const seg of row.segments) {
+			collect(seg.from);
+			collect(seg.to);
+		}
+		return lanes;
+	}
+
+	function expectSetsEqual(a: Set<number>, b: Set<number>) {
+		expect([...a].sort()).toEqual([...b].sort());
+	}
+
+	function expectContinuous(topology: GraphTopologyRow[]) {
+		const { rows } = assignLanes(topology);
+		expect(boundaryLanes(rows[0], "top").size).toBe(0);
+		expect(boundaryLanes(rows.at(-1)!, "bottom").size).toBe(0);
+		for (let i = 0; i < rows.length - 1; i += 1) {
+			expectSetsEqual(boundaryLanes(rows[i], "bottom"), boundaryLanes(rows[i + 1], "top"));
+		}
+	}
+
+	describe("render segments", () => {
+		it("keep lane lines continuous across every row boundary", () => {
+			expectContinuous([commit("C", ["B"]), commit("B", ["A"]), commit("A")]);
+			expectContinuous([
+				commit("M", ["A", "B"]),
+				commit("A", ["BASE"]),
+				commit("B", ["BASE"]),
+				commit("BASE"),
+			]);
+			expectContinuous([
+				commit("LEFT_MERGE", ["LEFT_1", "RIGHT_MERGE"]),
+				commit("RIGHT_MERGE", ["RIGHT_1", "LEFT_1"]),
+				commit("LEFT_1", ["BASE"]),
+				commit("RIGHT_1", ["BASE"]),
+				commit("BASE"),
+			]);
+			expectContinuous([
+				commit("OCTOPUS", ["A", "B", "C"]),
+				commit("A", ["BASE"]),
+				commit("B", ["BASE"]),
+				commit("C", ["BASE"]),
+				commit("BASE"),
+			]);
+		});
+
+		it("routes a merge commit's parents to distinct bottom lanes", () => {
+			const { rows } = assignLanes([
+				commit("M", ["A", "B"]),
+				commit("A", ["BASE"]),
+				commit("B", ["BASE"]),
+				commit("BASE"),
+			]);
+			const bottoms = rows[0].segments
+				.filter((s) => s.from.at === "node" && s.to.at === "bottom")
+				.map((s) => (s.to.at === "bottom" ? s.to.lane : -1))
+				.sort();
+			expect(bottoms).toEqual([0, 1]);
+		});
+
+		it("passes active lanes straight through a stash row with a dashed connector", () => {
+			const { rows } = assignLanes([
+				commit("C", ["B"]),
+				commit("B", ["A"]),
+				stash("STASH", "B", "stash: keep changes"),
+				commit("A"),
+			]);
+			const stashRow = rows.find((r) => r.kind === "stash")!;
+			expect(stashRow.segments.some((s) => s.dashed && s.to.at === "node")).toBe(true);
+			// Lane 0 (B's first parent A) keeps flowing through the stash row.
+			expect(
+				stashRow.segments.some(
+					(s) => !s.dashed && s.from.at === "top" && s.to.at === "bottom",
+				),
+			).toBe(true);
+		});
 	});
 
 	it("attaches stash pseudo-rows to their base commit lane", () => {

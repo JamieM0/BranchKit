@@ -5,7 +5,8 @@ export function isMac(): boolean {
 	return navigator.platform.toUpperCase().includes("MAC");
 }
 
-/** The primary modifier for global shortcuts: Cmd on macOS, Ctrl elsewhere. */
-export function isModEvent(e: KeyboardEvent): boolean {
+/** The primary modifier for global shortcuts: Cmd on macOS, Ctrl elsewhere. Accepts keyboard and
+ * mouse events (Cmd/Ctrl+click compare selection — DESIGN_SPEC.md §4.3). */
+export function isModEvent(e: KeyboardEvent | MouseEvent): boolean {
 	return isMac() ? e.metaKey : e.ctrlKey;
 }

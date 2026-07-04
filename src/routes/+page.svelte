@@ -4,12 +4,31 @@
   import FirstLaunch from "$lib/components/shell/FirstLaunch.svelte";
   import RepoPicker from "$lib/components/shell/RepoPicker.svelte";
   import RepoTabs from "$lib/components/shell/RepoTabs.svelte";
+  import GraphView from "$lib/components/graph/GraphView.svelte";
   import { isModEvent } from "$lib/platform";
   import { onboarding } from "$lib/stores/onboarding.svelte";
   import { repos } from "$lib/stores/repo.svelte";
+  import { graph } from "$lib/stores/graph.svelte";
 
   let showPicker = $state(false);
   let showClone = $state(false);
+
+  // Keep the graph store pointed at the active repo. Real repo ids only — a `pending:` clone tab has
+  // no backend repo yet. Git mutations from the graph (checkout, create branch, …) land in later
+  // prompts; for now the graph emits them as intents that this shell logs.
+  let openedGraphId: string | null = null;
+  $effect(() => {
+    const id = repos.activeId;
+    if (id && !id.startsWith("pending:")) {
+      if (id !== openedGraphId) {
+        openedGraphId = id;
+        graph.open(id).catch((e) => console.error(e));
+      }
+    } else if (openedGraphId) {
+      openedGraphId = null;
+      void graph.close();
+    }
+  });
 
   function openPicker() {
     showPicker = true;
@@ -65,11 +84,14 @@
     <RepoTabs onPick={openPicker} />
     <div class="content">
       {#if repos.active}
-        <div class="placeholder">
-          <h2>{repos.active.name}</h2>
-          <p>{repos.active.detached ? "Detached HEAD" : (repos.active.branch ?? "No commits yet")}</p>
-          <p class="hint">The graph, status and diff views land in later prompts.</p>
-        </div>
+        <GraphView
+          onSelectCommit={(sha) => console.debug("select commit", sha)}
+          onCompare={(a, b) => console.debug("compare", a, b)}
+          onOpenCommit={(sha) => console.debug("open commit", sha)}
+          onCheckout={(sha) => console.debug("checkout (detach)", sha)}
+          onCreateBranch={(sha) => console.debug("create branch at", sha)}
+          onBackToBranch={() => console.debug("back to previous branch")}
+        />
       {/if}
     </div>
   </div>
@@ -93,26 +115,7 @@
 
   .content {
     flex: 1;
-    overflow: auto;
-  }
-
-  .placeholder {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
-    color: var(--text-muted);
-  }
-
-  .placeholder h2 {
-    color: var(--text);
-    font-size: 16px;
-  }
-
-  .hint {
-    color: var(--text-faint);
-    font-size: 12px;
+    min-height: 0;
+    overflow: hidden;
   }
 </style>
