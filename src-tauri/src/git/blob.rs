@@ -33,7 +33,13 @@ pub async fn read_blob(repo: &Path, revision: Option<&str>, path: &str) -> Resul
             })
         }
         Some(rev) => {
-            let spec = format!("{rev}:{path}");
+            // `:path` (no sha before the colon) is git's own syntax for "index stage 0 of path" —
+            // `rev` is already `:` in that case, so don't double it up into `::path`.
+            let spec = if rev == ":" {
+                format!(":{path}")
+            } else {
+                format!("{rev}:{path}")
+            };
             let output = git(repo, &["show", &spec], GitOpts::default()).await?;
             Ok(output.stdout)
         }

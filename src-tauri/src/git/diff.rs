@@ -88,12 +88,13 @@ pub async fn diff_two_commits(
     run_diff(repo, &["diff", "--no-color", "-U3", a, b, "--", path], ignore_whitespace).await
 }
 
-/// Appends `-w` (ignore all whitespace) when requested — the diff viewer's whitespace toggle
-/// (DESIGN_SPEC.md §6.2).
+/// Inserts `-w` (ignore all whitespace) right after the subcommand when requested — the diff
+/// viewer's whitespace toggle (DESIGN_SPEC.md §6.2). Must land *before* the `--` path separator
+/// every caller ends with, or git treats it as a literal pathspec instead of a flag.
 async fn run_diff(repo: &Path, args: &[&str], ignore_whitespace: bool) -> Result<FileDiff, GitError> {
     let mut full_args: Vec<&str> = args.to_vec();
     if ignore_whitespace {
-        full_args.push("-w");
+        full_args.insert(1, "-w");
     }
     let output = git(repo, &full_args, GitOpts::default()).await?;
     Ok(parse_diff_output(&output.stdout))

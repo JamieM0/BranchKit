@@ -148,3 +148,21 @@ async fn image_extension_is_flagged() {
         .expect("diff");
     assert!(file_diff.is_image);
 }
+
+#[tokio::test]
+async fn ignore_whitespace_flag_hides_whitespace_only_changes() {
+    let repo = TestRepo::init().await;
+    repo.write("a.txt", "line1\nline2\nline3\n");
+    repo.commit_all("base").await;
+    repo.write("a.txt", "line1\nline2   \nline3\n");
+
+    let with_whitespace = diff::diff_worktree(repo.path(), "a.txt", false)
+        .await
+        .expect("diff");
+    assert_eq!(with_whitespace.hunks.len(), 1);
+
+    let ignoring_whitespace = diff::diff_worktree(repo.path(), "a.txt", true)
+        .await
+        .expect("diff");
+    assert!(ignoring_whitespace.hunks.is_empty());
+}

@@ -173,15 +173,28 @@ export async function unstageAll(repoId: string): Promise<void> {
 
 // --- diffs (ARCHITECTURE.md §6.2) ---
 
-export async function getDiffWorktree(repoId: string, path: string, ignoreWhitespace: boolean): Promise<FileDiff> {
+export async function getDiffWorktree(
+  repoId: string,
+  path: string,
+  ignoreWhitespace: boolean,
+): Promise<FileDiff> {
   return invoke("get_diff_worktree", { repoId, path, ignoreWhitespace });
 }
 
-export async function getDiffStaged(repoId: string, path: string, ignoreWhitespace: boolean): Promise<FileDiff> {
+export async function getDiffStaged(
+  repoId: string,
+  path: string,
+  ignoreWhitespace: boolean,
+): Promise<FileDiff> {
   return invoke("get_diff_staged", { repoId, path, ignoreWhitespace });
 }
 
-export async function getDiffCommit(repoId: string, sha: string, path: string, ignoreWhitespace: boolean): Promise<FileDiff> {
+export async function getDiffCommit(
+  repoId: string,
+  sha: string,
+  path: string,
+  ignoreWhitespace: boolean,
+): Promise<FileDiff> {
   return invoke("get_diff_commit", { repoId, sha, path, ignoreWhitespace });
 }
 
@@ -201,6 +214,17 @@ export async function getCommitFiles(repoId: string, sha: string): Promise<Chang
 
 export async function getDiffFiles(repoId: string, a: string, b: string): Promise<ChangedFile[]> {
   return invoke("get_diff_files", { repoId, a, b });
+}
+
+/** `revision: null` reads the worktree file off disk; `":"` reads the staged/index blob; any
+ * other string is a commit sha — the diff viewer's image-diff before/after (§6.2). */
+export async function getBlob(
+  repoId: string,
+  revision: string | null,
+  path: string,
+): Promise<string> {
+  const blob = await invoke<{ base64: string }>("get_blob", { repoId, revision, path });
+  return blob.base64;
 }
 
 /** Subscribes to `repo://{id}/changed` — ARCHITECTURE.md §2. Returns the unlisten function. */

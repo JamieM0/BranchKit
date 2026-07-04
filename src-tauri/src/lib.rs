@@ -57,6 +57,7 @@ pub fn run() {
             git::diff::get_diff_two_commits,
             git::diff::get_commit_files,
             git::diff::get_diff_files,
+            git::blob::get_blob,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

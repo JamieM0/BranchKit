@@ -6,16 +6,17 @@
   import RepoTabs from "$lib/components/shell/RepoTabs.svelte";
   import GraphView from "$lib/components/graph/GraphView.svelte";
   import LeftPanel from "$lib/components/panel/LeftPanel.svelte";
+  import RightPanel from "$lib/components/panel/RightPanel.svelte";
+  import DiffViewer from "$lib/components/diff/DiffViewer.svelte";
   import ToastStack from "$lib/components/shell/ToastStack.svelte";
   import { isModEvent } from "$lib/platform";
   import { onboarding } from "$lib/stores/onboarding.svelte";
   import { repos } from "$lib/stores/repo.svelte";
   import { graph } from "$lib/stores/graph.svelte";
+  import { status } from "$lib/stores/status.svelte";
+  import { diffView } from "$lib/stores/diffView.svelte";
   import { branchEdit } from "$lib/stores/branchEdit.svelte";
   import { graphNav } from "$lib/stores/graphNav.svelte";
-  import { diffView } from "$lib/stores/diffView.svelte";
-  import RightPanel from "$lib/components/panel/RightPanel.svelte";
-  import DiffViewer from "$lib/diff/DiffViewer.svelte";
 
   let showPicker = $state(false);
   let showClone = $state(false);
@@ -30,10 +31,14 @@
       if (id !== openedGraphId) {
         openedGraphId = id;
         graph.open(id).catch((e) => console.error(e));
+        status.open(id).catch((e) => console.error(e));
+        diffView.close();
       }
     } else if (openedGraphId) {
       openedGraphId = null;
       void graph.close();
+      void status.close();
+      diffView.close();
     }
   });
 
@@ -102,7 +107,7 @@
         <LeftPanel />
         <div class="graph-area">
           {#if diffView.target}
-            <DiffViewer />
+            <DiffViewer target={diffView.target} onBack={() => diffView.close()} />
           {:else}
             <GraphView
               onSelectCommit={(sha) => console.debug("select commit", sha)}
