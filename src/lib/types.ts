@@ -1,5 +1,40 @@
 /** Mirrors Rust DTOs exactly — ARCHITECTURE.md §1. */
 
+// --- repo.rs ---------------------------------------------------------
+
+export interface RepoInfo {
+	id: string;
+	path: string;
+	name: string;
+	/** `null` on an unborn branch (no commits yet) as well as on a real detached HEAD. */
+	branch: string | null;
+	detached: boolean;
+}
+
+export interface RecentRepo {
+	path: string;
+	name: string;
+	/** Unix seconds. */
+	lastOpenedAt: number;
+}
+
+// --- events.rs ---------------------------------------------------------
+
+export type ChangeKind =
+	| { kind: 'workingTree' }
+	| { kind: 'index' }
+	| { kind: 'refs' }
+	| { kind: 'head' }
+	| { kind: 'remote' }
+	| { kind: 'operationProgress'; phase: string; percent: number | null };
+
+// --- git/identity.rs ---------------------------------------------------------
+
+export interface GitIdentity {
+	name: string | null;
+	email: string | null;
+}
+
 // --- git/log.rs ---------------------------------------------------------
 
 export interface CommitTopology {

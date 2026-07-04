@@ -3,6 +3,7 @@
 
 pub mod diff;
 pub mod exec;
+pub mod identity;
 pub mod log;
 pub mod refs;
 pub mod status;

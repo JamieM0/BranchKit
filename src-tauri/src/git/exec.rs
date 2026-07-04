@@ -3,10 +3,13 @@
 
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::OnceLock;
 use std::time::Duration;
 
+use regex::Regex;
+use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
+use tokio::process::{ChildStderr, Command};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -232,6 +235,131 @@ pub async fn git(repo: &Path, args: &[&str], opts: GitOpts) -> Result<GitOutput,
     }
 }
 
+/// A parsed `N%` progress line from a network op's stderr — ARCHITECTURE.md §3.1.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgressUpdate {
+    pub phase: String,
+    pub percent: u32,
+}
+
+/// Matches git's `--progress` phase lines, e.g. `Receiving objects:  42% (420/1000)`.
+fn parse_progress_line(line: &str) -> Option<ProgressUpdate> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(
+            r"^(Counting objects|Compressing objects|Receiving objects|Resolving deltas|Writing objects|Updating files):\s+(\d+)%",
+        )
+        .expect("static regex is valid")
+    });
+    let caps = re.captures(line.trim())?;
+    Some(ProgressUpdate {
+        phase: caps.get(1)?.as_str().to_string(),
+        percent: caps.get(2)?.as_str().parse().ok()?,
+    })
+}
+
+/// Like [`git`], but reads stderr incrementally — split on `\r` as well as `\n`, since progress
+/// bars rewrite their line with `\r` — and calls `on_progress` with each parsed percentage
+/// (ARCHITECTURE.md §3.1). `cwd` need not be a git repo yet: `clone` runs with `cwd` set to the
+/// destination's parent directory, before the repo exists.
+pub async fn git_with_progress(
+    cwd: &Path,
+    args: &[&str],
+    opts: GitOpts,
+    mut on_progress: impl FnMut(ProgressUpdate),
+) -> Result<GitOutput, GitError> {
+    let cmd_summary = format!("git {}", args.join(" "));
+    let mut command = build_command(cwd, args);
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| GitError::spawn(&cmd_summary, e))?;
+
+    let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
+    let stderr_pipe = child.stderr.take().expect("stderr was piped");
+
+    let stdout_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        stdout_pipe.read_to_end(&mut buf).await.map(|_| buf)
+    });
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let stderr_task = tokio::spawn(read_stderr_lines(stderr_pipe, tx));
+
+    let run = async {
+        // Drains until the stderr reader drops `tx`, which happens once the pipe hits EOF —
+        // i.e. once the child has exited (or closed stderr early).
+        while let Some(line) = rx.recv().await {
+            if let Some(update) = parse_progress_line(&line) {
+                on_progress(update);
+            }
+        }
+        let status = child.wait().await?;
+        let stdout = stdout_task
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))??;
+        let stderr_bytes = stderr_task
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))??;
+        Ok::<_, std::io::Error>((status, stdout, stderr_bytes))
+    };
+
+    match tokio::time::timeout(opts.timeout, run).await {
+        Ok(Ok((status, stdout, stderr_bytes))) => {
+            let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+            let code = status.code().unwrap_or(-1);
+            if status.success() {
+                Ok(GitOutput {
+                    stdout,
+                    stderr,
+                    code,
+                })
+            } else {
+                Err(GitError::exited(code, stderr, cmd_summary))
+            }
+        }
+        Ok(Err(e)) => Err(GitError::spawn(&cmd_summary, e)),
+        Err(_elapsed) => {
+            #[cfg(unix)]
+            if let Some(pid) = child.id() {
+                kill_process_group(pid);
+            }
+            let _ = child.start_kill();
+            Err(GitError::timeout(cmd_summary))
+        }
+    }
+}
+
+async fn read_stderr_lines(
+    mut pipe: ChildStderr,
+    tx: tokio::sync::mpsc::UnboundedSender<String>,
+) -> std::io::Result<Vec<u8>> {
+    let mut all = Vec::new();
+    let mut buf = [0u8; 4096];
+    let mut current = String::new();
+    loop {
+        let n = pipe.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        all.extend_from_slice(&buf[..n]);
+        for ch in String::from_utf8_lossy(&buf[..n]).chars() {
+            if ch == '\r' || ch == '\n' {
+                if !current.is_empty() {
+                    let _ = tx.send(std::mem::take(&mut current));
+                }
+            } else {
+                current.push(ch);
+            }
+        }
+    }
+    if !current.is_empty() {
+        let _ = tx.send(current);
+    }
+    Ok(all)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GitVersion {
     pub major: u32,
@@ -323,5 +451,63 @@ mod tests {
     async fn detects_real_git_version() {
         let v = detect_git_version().await.expect("git must be on PATH for tests");
         assert!(v.major >= 2);
+    }
+
+    #[test]
+    fn parses_receiving_objects_progress_line() {
+        let update = parse_progress_line("Receiving objects:  42% (420/1000)").unwrap();
+        assert_eq!(update.phase, "Receiving objects");
+        assert_eq!(update.percent, 42);
+    }
+
+    #[test]
+    fn parses_progress_line_after_trimming_cr() {
+        let update = parse_progress_line("\rResolving deltas: 100% (10/10), done.").unwrap();
+        assert_eq!(update.phase, "Resolving deltas");
+        assert_eq!(update.percent, 100);
+    }
+
+    #[test]
+    fn ignores_non_progress_lines() {
+        assert!(parse_progress_line("fatal: repository not found").is_none());
+    }
+
+    #[tokio::test]
+    async fn git_with_progress_reports_clone_phases_and_returns_output() {
+        let src = tempfile::tempdir().expect("tempdir");
+        git(src.path(), &["init", "--initial-branch=main", "-q"], GitOpts::default())
+            .await
+            .unwrap();
+        git(src.path(), &["config", "user.name", "T"], GitOpts::default())
+            .await
+            .unwrap();
+        git(src.path(), &["config", "user.email", "t@example.com"], GitOpts::default())
+            .await
+            .unwrap();
+        std::fs::write(src.path().join("f.txt"), "hi").unwrap();
+        git(src.path(), &["add", "-A"], GitOpts::default()).await.unwrap();
+        git(src.path(), &["commit", "-q", "-m", "init"], GitOpts::default())
+            .await
+            .unwrap();
+
+        let parent = tempfile::tempdir().expect("tempdir");
+        let dest = parent.path().join("clone-dest");
+        let mut phases = Vec::new();
+        let src_str = src.path().to_str().unwrap();
+        let dest_str = dest.to_str().unwrap();
+        // `--no-local` forces the transport path (rather than a hardlink clone), which is what
+        // actually emits `N%` progress lines even for a same-machine source.
+        let output = git_with_progress(
+            parent.path(),
+            &["clone", "--no-local", "--progress", src_str, dest_str],
+            GitOpts::default(),
+            |update| phases.push(update.phase),
+        )
+        .await
+        .expect("clone should succeed");
+
+        assert_eq!(output.code, 0);
+        assert!(dest.join(".git").exists());
+        assert!(!phases.is_empty(), "expected at least one progress phase to be observed");
     }
 }
