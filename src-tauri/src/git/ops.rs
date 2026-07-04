@@ -23,15 +23,16 @@ const UNIT_SEP: char = '\u{1f}';
 const RECORD_SEP: char = '\u{1e}';
 
 /// Emits the targeted refresh(es) for an op that just completed — ARCHITECTURE.md §2/§4.
-fn emit_changes(app: &AppHandle, repo_id: &str, kinds: &[ChangeKind]) {
+pub(crate) fn emit_changes(app: &AppHandle, repo_id: &str, kinds: &[ChangeKind]) {
     let channel = format!("repo://{repo_id}/changed");
     for kind in kinds {
         let _ = app.emit(&channel, kind.clone());
     }
 }
 
-/// Resolves the handle for `repo_id` or the standard "not open" error.
-fn require_repo(
+/// Resolves the handle for `repo_id` or the standard "not open" error. Shared across `git/`
+/// command modules (stage.rs, diff.rs) so the "not open" error stays worded identically.
+pub(crate) fn require_repo(
     state: &State<'_, AppState>,
     repo_id: &str,
 ) -> Result<std::sync::Arc<RepoHandle>, AppError> {

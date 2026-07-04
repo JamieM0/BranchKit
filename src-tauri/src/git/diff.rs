@@ -5,8 +5,13 @@ use std::path::Path;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tauri::State;
+
+use crate::error::AppError;
+use crate::state::AppState;
 
 use super::exec::{git, GitError, GitOpts};
+use super::ops::require_repo;
 
 const IMAGE_EXTENSIONS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "bmp", "webp", "ico", "tiff", "tif", "svg",
@@ -48,18 +53,28 @@ pub struct FileDiff {
 }
 
 /// Worktree vs index: `git diff -- <path>`.
-pub async fn diff_worktree(repo: &Path, path: &str) -> Result<FileDiff, GitError> {
-    run_diff(repo, &["diff", "--no-color", "-U3", "--", path]).await
+pub async fn diff_worktree(repo: &Path, path: &str, ignore_whitespace: bool) -> Result<FileDiff, GitError> {
+    run_diff(repo, &["diff", "--no-color", "-U3", "--", path], ignore_whitespace).await
 }
 
 /// Index vs HEAD: `git diff --cached -- <path>`.
-pub async fn diff_staged(repo: &Path, path: &str) -> Result<FileDiff, GitError> {
-    run_diff(repo, &["diff", "--no-color", "-U3", "--cached", "--", path]).await
+pub async fn diff_staged(repo: &Path, path: &str, ignore_whitespace: bool) -> Result<FileDiff, GitError> {
+    run_diff(
+        repo,
+        &["diff", "--no-color", "-U3", "--cached", "--", path],
+        ignore_whitespace,
+    )
+    .await
 }
 
 /// A single commit vs its parent: `git show <sha> -- <path>`.
-pub async fn diff_commit(repo: &Path, sha: &str, path: &str) -> Result<FileDiff, GitError> {
-    run_diff(repo, &["show", "--no-color", "-U3", sha, "--", path]).await
+pub async fn diff_commit(
+    repo: &Path,
+    sha: &str,
+    path: &str,
+    ignore_whitespace: bool,
+) -> Result<FileDiff, GitError> {
+    run_diff(repo, &["show", "--no-color", "-U3", sha, "--", path], ignore_whitespace).await
 }
 
 /// Two arbitrary commits: `git diff <a> <b> -- <path>`.
@@ -68,13 +83,211 @@ pub async fn diff_two_commits(
     a: &str,
     b: &str,
     path: &str,
+    ignore_whitespace: bool,
 ) -> Result<FileDiff, GitError> {
-    run_diff(repo, &["diff", "--no-color", "-U3", a, b, "--", path]).await
+    run_diff(repo, &["diff", "--no-color", "-U3", a, b, "--", path], ignore_whitespace).await
 }
 
-async fn run_diff(repo: &Path, args: &[&str]) -> Result<FileDiff, GitError> {
-    let output = git(repo, args, GitOpts::default()).await?;
+/// Appends `-w` (ignore all whitespace) when requested — the diff viewer's whitespace toggle
+/// (DESIGN_SPEC.md §6.2).
+async fn run_diff(repo: &Path, args: &[&str], ignore_whitespace: bool) -> Result<FileDiff, GitError> {
+    let mut full_args: Vec<&str> = args.to_vec();
+    if ignore_whitespace {
+        full_args.push("-w");
+    }
+    let output = git(repo, &full_args, GitOpts::default()).await?;
     Ok(parse_diff_output(&output.stdout))
+}
+
+#[tauri::command]
+pub async fn get_diff_worktree(
+    state: State<'_, AppState>,
+    repo_id: String,
+    path: String,
+    ignore_whitespace: bool,
+) -> Result<FileDiff, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    Ok(diff_worktree(&handle.path, &path, ignore_whitespace).await?)
+}
+
+#[tauri::command]
+pub async fn get_diff_staged(
+    state: State<'_, AppState>,
+    repo_id: String,
+    path: String,
+    ignore_whitespace: bool,
+) -> Result<FileDiff, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    Ok(diff_staged(&handle.path, &path, ignore_whitespace).await?)
+}
+
+#[tauri::command]
+pub async fn get_diff_commit(
+    state: State<'_, AppState>,
+    repo_id: String,
+    sha: String,
+    path: String,
+    ignore_whitespace: bool,
+) -> Result<FileDiff, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    Ok(diff_commit(&handle.path, &sha, &path, ignore_whitespace).await?)
+}
+
+#[tauri::command]
+pub async fn get_diff_two_commits(
+    state: State<'_, AppState>,
+    repo_id: String,
+    a: String,
+    b: String,
+    path: String,
+    ignore_whitespace: bool,
+) -> Result<FileDiff, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    Ok(diff_two_commits(&handle.path, &a, &b, &path, ignore_whitespace).await?)
+}
+
+// --- changed-file lists — commit-detail mode's file list and compare mode's file list
+// (DESIGN_SPEC.md §6.1 "changed-file list", §15.5) ---
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangedFileStatus {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Copied,
+    TypeChanged,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedFile {
+    pub path: String,
+    /// Set for renames/copies.
+    pub orig_path: Option<String>,
+    pub status: ChangedFileStatus,
+}
+
+/// Parses `git diff --name-status -M -z` / `git diff-tree --name-status -M -r -z` output. Each
+/// record is `<code>\0<path>\0` (or `<code>\0<origPath>\0<newPath>\0` for `R`/`C`, where `code`
+/// carries a trailing similarity score digit string like `R100` that we ignore).
+fn parse_name_status(stdout: &[u8]) -> Vec<ChangedFile> {
+    let text = String::from_utf8_lossy(stdout);
+    let tokens: Vec<&str> = text.split('\0').filter(|t| !t.is_empty()).collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        let code = tokens[i];
+        i += 1;
+        let letter = code.chars().next().unwrap_or('M');
+        match letter {
+            'R' | 'C' => {
+                if i + 1 >= tokens.len() {
+                    break;
+                }
+                let orig_path = tokens[i].to_string();
+                let path = tokens[i + 1].to_string();
+                i += 2;
+                out.push(ChangedFile {
+                    path,
+                    orig_path: Some(orig_path),
+                    status: if letter == 'R' {
+                        ChangedFileStatus::Renamed
+                    } else {
+                        ChangedFileStatus::Copied
+                    },
+                });
+            }
+            _ => {
+                if i >= tokens.len() {
+                    break;
+                }
+                let path = tokens[i].to_string();
+                i += 1;
+                let status = match letter {
+                    'A' => ChangedFileStatus::Added,
+                    'D' => ChangedFileStatus::Deleted,
+                    'T' => ChangedFileStatus::TypeChanged,
+                    _ => ChangedFileStatus::Modified,
+                };
+                out.push(ChangedFile {
+                    path,
+                    orig_path: None,
+                    status,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Changed files for a single commit, diffed against its first parent (root commits diff
+/// against the empty tree via `--root`) — mirrors what `git show`'s file list would contain.
+pub async fn commit_files(repo: &Path, sha: &str) -> Result<Vec<ChangedFile>, GitError> {
+    let parent_ref = format!("{sha}^");
+    match git(repo, &["rev-parse", &parent_ref], GitOpts::default()).await {
+        Ok(parent_out) => {
+            let parent = String::from_utf8_lossy(&parent_out.stdout).trim().to_string();
+            let output = git(
+                repo,
+                &["diff", "--no-color", "--name-status", "-M", "-z", &parent, sha],
+                GitOpts::default(),
+            )
+            .await?;
+            Ok(parse_name_status(&output.stdout))
+        }
+        Err(_) => {
+            let output = git(
+                repo,
+                &[
+                    "diff-tree",
+                    "--no-commit-id",
+                    "--name-status",
+                    "-M",
+                    "-r",
+                    "-z",
+                    "--root",
+                    sha,
+                ],
+                GitOpts::default(),
+            )
+            .await?;
+            Ok(parse_name_status(&output.stdout))
+        }
+    }
+}
+
+/// Changed files between two arbitrary commits — compare mode's file list (§15.5).
+pub async fn diff_files_two_commits(repo: &Path, a: &str, b: &str) -> Result<Vec<ChangedFile>, GitError> {
+    let output = git(
+        repo,
+        &["diff", "--no-color", "--name-status", "-M", "-z", a, b],
+        GitOpts::default(),
+    )
+    .await?;
+    Ok(parse_name_status(&output.stdout))
+}
+
+#[tauri::command]
+pub async fn get_commit_files(
+    state: State<'_, AppState>,
+    repo_id: String,
+    sha: String,
+) -> Result<Vec<ChangedFile>, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    Ok(commit_files(&handle.path, &sha).await?)
+}
+
+#[tauri::command]
+pub async fn get_diff_files(
+    state: State<'_, AppState>,
+    repo_id: String,
+    a: String,
+    b: String,
+) -> Result<Vec<ChangedFile>, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    Ok(diff_files_two_commits(&handle.path, &a, &b).await?)
 }
 
 fn extract_diff_path(raw: &str) -> Option<String> {
@@ -301,5 +514,35 @@ mod tests {
         let lines = &result.hunks[0].lines;
         assert_eq!(lines[0].old_no, Some(1));
         assert_eq!(lines[1].new_no, Some(1));
+    }
+
+    fn join_nul(records: &[&str]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for r in records {
+            out.extend_from_slice(r.as_bytes());
+            out.push(0);
+        }
+        out
+    }
+
+    #[test]
+    fn parses_added_modified_deleted_name_status() {
+        let bytes = join_nul(&["A", "new.txt", "M", "changed.txt", "D", "gone.txt"]);
+        let files = parse_name_status(&bytes);
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0].path, "new.txt");
+        assert_eq!(files[0].status, ChangedFileStatus::Added);
+        assert_eq!(files[1].status, ChangedFileStatus::Modified);
+        assert_eq!(files[2].status, ChangedFileStatus::Deleted);
+    }
+
+    #[test]
+    fn parses_rename_as_rename_not_delete_plus_add() {
+        let bytes = join_nul(&["R100", "old_name.txt", "new_name.txt"]);
+        let files = parse_name_status(&bytes);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].status, ChangedFileStatus::Renamed);
+        assert_eq!(files[0].path, "new_name.txt");
+        assert_eq!(files[0].orig_path.as_deref(), Some("old_name.txt"));
     }
 }

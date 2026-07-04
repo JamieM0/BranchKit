@@ -6,6 +6,8 @@
 interface Persisted {
 	combineTrackingBranches: boolean;
 	leftPanelCollapsed: boolean;
+	/** Working-directory file list display — DESIGN_SPEC.md §6.1 "Path/Tree toggle (persisted)". */
+	fileListView: "path" | "tree";
 }
 
 const STORAGE_KEY = "branchkit:settings";
@@ -23,6 +25,7 @@ function load(): Partial<Persisted> {
 class SettingsStore {
 	combineTrackingBranches = $state(true);
 	leftPanelCollapsed = $state(false);
+	fileListView = $state<"path" | "tree">("path");
 
 	constructor() {
 		const stored = load();
@@ -30,6 +33,8 @@ class SettingsStore {
 			this.combineTrackingBranches = stored.combineTrackingBranches;
 		if (typeof stored.leftPanelCollapsed === "boolean")
 			this.leftPanelCollapsed = stored.leftPanelCollapsed;
+		if (stored.fileListView === "path" || stored.fileListView === "tree")
+			this.fileListView = stored.fileListView;
 	}
 
 	#persist() {
@@ -37,6 +42,7 @@ class SettingsStore {
 		const snapshot: Persisted = {
 			combineTrackingBranches: this.combineTrackingBranches,
 			leftPanelCollapsed: this.leftPanelCollapsed,
+			fileListView: this.fileListView,
 		};
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
 	}
@@ -48,6 +54,11 @@ class SettingsStore {
 
 	toggleLeftPanel() {
 		this.leftPanelCollapsed = !this.leftPanelCollapsed;
+		this.#persist();
+	}
+
+	setFileListView(value: "path" | "tree") {
+		this.fileListView = value;
 		this.#persist();
 	}
 }

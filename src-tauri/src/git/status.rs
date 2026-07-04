@@ -4,8 +4,13 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use tauri::State;
+
+use crate::error::AppError;
+use crate::state::AppState;
 
 use super::exec::{git, GitError, GitOpts};
+use super::ops::require_repo;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -92,6 +97,14 @@ pub async fn status(repo: &Path) -> Result<StatusReport, GitError> {
     )
     .await?;
     Ok(parse_status(&output.stdout))
+}
+
+/// Working-directory panel's status feed — DESIGN_SPEC.md §6.1. Re-fetched on `WorkingTree`,
+/// `Index` and `Head` refresh events (a checkout changes the branch name in the header too).
+#[tauri::command]
+pub async fn get_status(state: State<'_, AppState>, repo_id: String) -> Result<StatusReport, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    Ok(status(&handle.path).await?)
 }
 
 fn parse_branch_header(report: &mut BranchStatus, header: &str) {

@@ -10,7 +10,7 @@ async fn worktree_diff_reports_context_add_and_del() {
     repo.commit_all("base").await;
     repo.write("a.txt", "line1\nline2 changed\nline3\n");
 
-    let file_diff = diff::diff_worktree(repo.path(), "a.txt")
+    let file_diff = diff::diff_worktree(repo.path(), "a.txt", false)
         .await
         .expect("diff");
     assert!(!file_diff.is_binary);
@@ -32,7 +32,7 @@ async fn staged_diff_only_shows_index_changes() {
     // Unstaged edit that must NOT appear in the --cached diff.
     repo.write("a.txt", "three\n");
 
-    let staged = diff::diff_staged(repo.path(), "a.txt")
+    let staged = diff::diff_staged(repo.path(), "a.txt", false)
         .await
         .expect("staged diff");
     let all_text: String = staged.hunks[0]
@@ -53,7 +53,7 @@ async fn commit_diff_shows_that_commits_changes() {
     repo.write("a.txt", "two\n");
     let sha = repo.commit_all("second").await;
 
-    let file_diff = diff::diff_commit(repo.path(), &sha, "a.txt")
+    let file_diff = diff::diff_commit(repo.path(), &sha, "a.txt", false)
         .await
         .expect("commit diff");
     assert_eq!(file_diff.hunks.len(), 1);
@@ -70,7 +70,7 @@ async fn two_commit_diff_spans_multiple_commits() {
     repo.write("a.txt", "three\n");
     let sha_c = repo.commit_all("third").await;
 
-    let file_diff = diff::diff_two_commits(repo.path(), &sha_a, &sha_c, "a.txt")
+    let file_diff = diff::diff_two_commits(repo.path(), &sha_a, &sha_c, "a.txt", false)
         .await
         .expect("two-commit diff");
     assert!(file_diff.hunks[0].lines.iter().any(|l| l.text == "three"));
@@ -84,7 +84,7 @@ async fn no_trailing_newline_marker_is_preserved() {
     repo.commit_all("base").await;
     repo.write_bytes("a.txt", b"one\ntwo changed");
 
-    let file_diff = diff::diff_worktree(repo.path(), "a.txt")
+    let file_diff = diff::diff_worktree(repo.path(), "a.txt", false)
         .await
         .expect("diff");
     let del_line = file_diff.hunks[0]
@@ -111,7 +111,7 @@ async fn marker_like_content_does_not_confuse_hunk_parsing() {
     // must still treat this as an ordinary line, not a false hunk boundary.
     repo.write("a.txt", "line1\n<<<<<<< HEAD\nline3\n");
 
-    let file_diff = diff::diff_worktree(repo.path(), "a.txt")
+    let file_diff = diff::diff_worktree(repo.path(), "a.txt", false)
         .await
         .expect("diff");
     assert_eq!(file_diff.hunks.len(), 1);
@@ -129,7 +129,7 @@ async fn binary_file_reports_no_hunks() {
     repo.commit_all("base").await;
     repo.write_bytes("image.bin", b"\x89PNG\x00\x01\x02\x04");
 
-    let file_diff = diff::diff_worktree(repo.path(), "image.bin")
+    let file_diff = diff::diff_worktree(repo.path(), "image.bin", false)
         .await
         .expect("diff");
     assert!(file_diff.is_binary);
@@ -143,7 +143,7 @@ async fn image_extension_is_flagged() {
     repo.commit_all("base").await;
     repo.write_bytes("photo.png", b"\x89PNG\x00binarydatavariant");
 
-    let file_diff = diff::diff_worktree(repo.path(), "photo.png")
+    let file_diff = diff::diff_worktree(repo.path(), "photo.png", false)
         .await
         .expect("diff");
     assert!(file_diff.is_image);

@@ -46,6 +46,17 @@ pub fn run() {
             git::ops::push,
             git::ops::set_upstream,
             git::ops::branch_divergence,
+            git::status::get_status,
+            git::stage::stage_file,
+            git::stage::unstage_file,
+            git::stage::stage_all,
+            git::stage::unstage_all,
+            git::diff::get_diff_worktree,
+            git::diff::get_diff_staged,
+            git::diff::get_diff_commit,
+            git::diff::get_diff_two_commits,
+            git::diff::get_commit_files,
+            git::diff::get_diff_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

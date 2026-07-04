@@ -205,3 +205,18 @@ export interface FileDiff {
 	newPath: string | null;
 	hunks: Hunk[];
 }
+
+export type ChangedFileStatus =
+	| 'added'
+	| 'modified'
+	| 'deleted'
+	| 'renamed'
+	| 'copied'
+	| 'typeChanged';
+
+export interface ChangedFile {
+	path: string;
+	/** Set for renames/copies. */
+	origPath: string | null;
+	status: ChangedFileStatus;
+}

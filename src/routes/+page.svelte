@@ -13,6 +13,9 @@
   import { graph } from "$lib/stores/graph.svelte";
   import { branchEdit } from "$lib/stores/branchEdit.svelte";
   import { graphNav } from "$lib/stores/graphNav.svelte";
+  import { diffView } from "$lib/stores/diffView.svelte";
+  import RightPanel from "$lib/components/panel/RightPanel.svelte";
+  import DiffViewer from "$lib/diff/DiffViewer.svelte";
 
   let showPicker = $state(false);
   let showClone = $state(false);
@@ -98,12 +101,17 @@
       {#if repos.active}
         <LeftPanel />
         <div class="graph-area">
-          <GraphView
-            onSelectCommit={(sha) => console.debug("select commit", sha)}
-            onCompare={(a, b) => console.debug("compare", a, b)}
-            onOpenCommit={(sha) => console.debug("open commit", sha)}
-          />
+          {#if diffView.target}
+            <DiffViewer />
+          {:else}
+            <GraphView
+              onSelectCommit={(sha) => console.debug("select commit", sha)}
+              onCompare={(a, b) => console.debug("compare", a, b)}
+              onOpenCommit={(sha) => console.debug("open commit", sha)}
+            />
+          {/if}
         </div>
+        <RightPanel />
       {/if}
     </div>
   </div>

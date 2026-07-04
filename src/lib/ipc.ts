@@ -2,14 +2,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
+  ChangedFile,
   ChangeKind,
   CommitMeta,
   Divergence,
+  FileDiff,
   GitIdentity,
   GraphTopologyRow,
   RecentRepo,
   RefsResponse,
   RepoInfo,
+  StatusReport,
   WorktreeInfo,
 } from "./types";
 
@@ -144,6 +147,60 @@ export async function setUpstream(
 
 export async function branchDivergence(repoId: string, branch: string): Promise<Divergence> {
   return invoke("branch_divergence", { repoId, branch });
+}
+
+// --- status & staging (ARCHITECTURE.md §6.1, §7.1) ---
+
+export async function getStatus(repoId: string): Promise<StatusReport> {
+  return invoke("get_status", { repoId });
+}
+
+export async function stageFile(repoId: string, path: string): Promise<void> {
+  return invoke("stage_file", { repoId, path });
+}
+
+export async function unstageFile(repoId: string, path: string): Promise<void> {
+  return invoke("unstage_file", { repoId, path });
+}
+
+export async function stageAll(repoId: string): Promise<void> {
+  return invoke("stage_all", { repoId });
+}
+
+export async function unstageAll(repoId: string): Promise<void> {
+  return invoke("unstage_all", { repoId });
+}
+
+// --- diffs (ARCHITECTURE.md §6.2) ---
+
+export async function getDiffWorktree(repoId: string, path: string, ignoreWhitespace: boolean): Promise<FileDiff> {
+  return invoke("get_diff_worktree", { repoId, path, ignoreWhitespace });
+}
+
+export async function getDiffStaged(repoId: string, path: string, ignoreWhitespace: boolean): Promise<FileDiff> {
+  return invoke("get_diff_staged", { repoId, path, ignoreWhitespace });
+}
+
+export async function getDiffCommit(repoId: string, sha: string, path: string, ignoreWhitespace: boolean): Promise<FileDiff> {
+  return invoke("get_diff_commit", { repoId, sha, path, ignoreWhitespace });
+}
+
+export async function getDiffTwoCommits(
+  repoId: string,
+  a: string,
+  b: string,
+  path: string,
+  ignoreWhitespace: boolean,
+): Promise<FileDiff> {
+  return invoke("get_diff_two_commits", { repoId, a, b, path, ignoreWhitespace });
+}
+
+export async function getCommitFiles(repoId: string, sha: string): Promise<ChangedFile[]> {
+  return invoke("get_commit_files", { repoId, sha });
+}
+
+export async function getDiffFiles(repoId: string, a: string, b: string): Promise<ChangedFile[]> {
+  return invoke("get_diff_files", { repoId, a, b });
 }
 
 /** Subscribes to `repo://{id}/changed` — ARCHITECTURE.md §2. Returns the unlisten function. */
