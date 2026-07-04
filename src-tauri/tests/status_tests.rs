@@ -37,11 +37,17 @@ async fn reports_partially_staged_file_in_both_sections() {
 #[tokio::test]
 async fn reports_staged_rename_with_orig_path() {
     let repo = TestRepo::init().await;
-    repo.write("old_name.txt", "some fairly unique content to survive similarity check\n");
+    repo.write(
+        "old_name.txt",
+        "some fairly unique content to survive similarity check\n",
+    );
     repo.commit_all("base").await;
 
     repo.remove("old_name.txt");
-    repo.write("new_name.txt", "some fairly unique content to survive similarity check\n");
+    repo.write(
+        "new_name.txt",
+        "some fairly unique content to survive similarity check\n",
+    );
     repo.stage_all().await;
 
     let report = status::status(repo.path()).await.expect("status");

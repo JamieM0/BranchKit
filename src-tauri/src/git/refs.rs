@@ -4,6 +4,10 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use tauri::State;
+
+use crate::error::AppError;
+use crate::state::AppState;
 
 use super::exec::{git, GitError, GitErrorKind, GitOpts};
 
@@ -41,6 +45,13 @@ pub struct HeadInfo {
     /// Short branch name, e.g. `main`. `None` when detached.
     pub branch: Option<String>,
     pub sha: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RefsResponse {
+    pub refs: Vec<RefInfo>,
+    pub head: HeadInfo,
 }
 
 fn classify(refname: &str) -> Option<(RefKind, String)> {
@@ -137,9 +148,17 @@ pub async fn list_refs(repo: &Path) -> Result<Vec<RefInfo>, GitError> {
 /// Current branch / detached-HEAD state — ARCHITECTURE.md §5.3.
 pub async fn head_info(repo: &Path) -> Result<HeadInfo, GitError> {
     let sha_output = git(repo, &["rev-parse", "HEAD"], GitOpts::default()).await?;
-    let sha = String::from_utf8_lossy(&sha_output.stdout).trim().to_string();
+    let sha = String::from_utf8_lossy(&sha_output.stdout)
+        .trim()
+        .to_string();
 
-    match git(repo, &["symbolic-ref", "-q", "--short", "HEAD"], GitOpts::default()).await {
+    match git(
+        repo,
+        &["symbolic-ref", "-q", "--short", "HEAD"],
+        GitOpts::default(),
+    )
+    .await
+    {
         Ok(output) => {
             let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
             Ok(HeadInfo {
@@ -156,6 +175,23 @@ pub async fn head_info(repo: &Path) -> Result<HeadInfo, GitError> {
         }),
         Err(e) => Err(e),
     }
+}
+
+#[tauri::command]
+pub async fn get_refs(
+    state: State<'_, AppState>,
+    repo_id: String,
+) -> Result<RefsResponse, AppError> {
+    let handle = state.get_repo(&repo_id).ok_or_else(|| {
+        AppError::new(
+            "Repository is not open",
+            format!("unknown repo id {repo_id}"),
+        )
+    })?;
+    Ok(RefsResponse {
+        refs: list_refs(&handle.path).await?,
+        head: head_info(&handle.path).await?,
+    })
 }
 
 #[cfg(test)]

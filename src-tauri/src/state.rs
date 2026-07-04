@@ -99,6 +99,12 @@ impl AppState {
             .find(|entry| entry.value().path == path)
             .map(|entry| entry.value().clone())
     }
+
+    pub fn get_repo(&self, id: &str) -> Option<std::sync::Arc<RepoHandle>> {
+        self.repos
+            .get(&RepoId(id.to_string()))
+            .map(|entry| entry.value().clone())
+    }
 }
 
 #[cfg(test)]

@@ -110,10 +110,7 @@ fn classify(git_dir: &Path, worktree_root: &Path, path: &Path) -> Option<Watched
     None
 }
 
-pub async fn start(
-    app: AppHandle,
-    handle: Arc<RepoHandle>,
-) -> Result<RepoWatcher, WatcherError> {
+pub async fn start(app: AppHandle, handle: Arc<RepoHandle>) -> Result<RepoWatcher, WatcherError> {
     let git_dir = resolve_git_dir(&handle.path).await?;
     let worktree_root = handle.path.clone();
 
@@ -189,7 +186,10 @@ mod tests {
     fn classifies_head_and_merge_state_files_as_head() {
         let git_dir = Path::new("/repo/.git");
         let root = Path::new("/repo");
-        assert_eq!(classify(git_dir, root, Path::new("/repo/.git/HEAD")), Some(WatchedKind::Head));
+        assert_eq!(
+            classify(git_dir, root, Path::new("/repo/.git/HEAD")),
+            Some(WatchedKind::Head)
+        );
         assert_eq!(
             classify(git_dir, root, Path::new("/repo/.git/MERGE_HEAD")),
             Some(WatchedKind::Head)
@@ -214,7 +214,10 @@ mod tests {
     fn classifies_index_and_fetch_head() {
         let git_dir = Path::new("/repo/.git");
         let root = Path::new("/repo");
-        assert_eq!(classify(git_dir, root, Path::new("/repo/.git/index")), Some(WatchedKind::Index));
+        assert_eq!(
+            classify(git_dir, root, Path::new("/repo/.git/index")),
+            Some(WatchedKind::Index)
+        );
         assert_eq!(
             classify(git_dir, root, Path::new("/repo/.git/FETCH_HEAD")),
             Some(WatchedKind::Remote)
@@ -225,13 +228,22 @@ mod tests {
     fn ignores_lockfiles_objects_logs_and_hooks() {
         let git_dir = Path::new("/repo/.git");
         let root = Path::new("/repo");
-        assert_eq!(classify(git_dir, root, Path::new("/repo/.git/index.lock")), None);
+        assert_eq!(
+            classify(git_dir, root, Path::new("/repo/.git/index.lock")),
+            None
+        );
         assert_eq!(
             classify(git_dir, root, Path::new("/repo/.git/objects/ab/cdef")),
             None
         );
-        assert_eq!(classify(git_dir, root, Path::new("/repo/.git/logs/HEAD")), None);
-        assert_eq!(classify(git_dir, root, Path::new("/repo/.git/hooks/pre-commit")), None);
+        assert_eq!(
+            classify(git_dir, root, Path::new("/repo/.git/logs/HEAD")),
+            None
+        );
+        assert_eq!(
+            classify(git_dir, root, Path::new("/repo/.git/hooks/pre-commit")),
+            None
+        );
     }
 
     #[test]
@@ -251,11 +263,19 @@ mod tests {
         let git_dir = Path::new("/main-repo/.git/worktrees/feature");
         let root = Path::new("/somewhere/else/feature-worktree");
         assert_eq!(
-            classify(git_dir, root, Path::new("/main-repo/.git/worktrees/feature/HEAD")),
+            classify(
+                git_dir,
+                root,
+                Path::new("/main-repo/.git/worktrees/feature/HEAD")
+            ),
             Some(WatchedKind::Head)
         );
         assert_eq!(
-            classify(git_dir, root, Path::new("/somewhere/else/feature-worktree/README.md")),
+            classify(
+                git_dir,
+                root,
+                Path::new("/somewhere/else/feature-worktree/README.md")
+            ),
             Some(WatchedKind::WorkingTree)
         );
     }
@@ -264,6 +284,9 @@ mod tests {
     fn unrelated_paths_are_ignored() {
         let git_dir = Path::new("/repo/.git");
         let root = Path::new("/repo");
-        assert_eq!(classify(git_dir, root, Path::new("/somewhere/else.txt")), None);
+        assert_eq!(
+            classify(git_dir, root, Path::new("/somewhere/else.txt")),
+            None
+        );
     }
 }

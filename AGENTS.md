@@ -13,7 +13,7 @@ Read docs/DESIGN_SPEC.md and docs/ARCHITECTURE.md sections relevant to your task
 Work only in this session — do NOT use subagents, the Task/Agent tool, or background agents,
 ever. Do not add dependencies beyond those named in ARCHITECTURE.md without a code comment
 justifying them. Follow the specs exactly; mark any deviation with a SPEC-DEVIATION comment.
-NEVER credit Claude or anyone at all in commit messages (no "Co-Authored-By", no generation
+NEVER credit Codex or anyone at all in commit messages (no "Co-Authored-By", no generation
 attribution, no names).
 
 ## Commands

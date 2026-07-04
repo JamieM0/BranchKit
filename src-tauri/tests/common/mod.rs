@@ -19,7 +19,8 @@ impl TestRepo {
         let repo = Self { dir };
         repo.run(&["init", "--initial-branch=main", "-q"]).await;
         repo.run(&["config", "user.name", "Test User"]).await;
-        repo.run(&["config", "user.email", "test@example.com"]).await;
+        repo.run(&["config", "user.email", "test@example.com"])
+            .await;
         // Deterministic commit dates so tests never depend on wall-clock time.
         repo.run(&["config", "commit.gpgsign", "false"]).await;
         repo
@@ -104,7 +105,8 @@ impl TestRepo {
     /// fast-forwards) so graph-topology fixtures get the shape the test actually asked for.
     /// Returns `Err` on conflict — callers assert on that.
     pub async fn merge(&self, branch: &str) -> Result<GitOutput, GitError> {
-        self.try_run(&["merge", "--no-ff", "--no-edit", branch]).await
+        self.try_run(&["merge", "--no-ff", "--no-edit", branch])
+            .await
     }
 
     pub async fn worktree_add(&self, path: &Path, branch: &str) {

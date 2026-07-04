@@ -1,7 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import type { ChangeKind, GitIdentity, RecentRepo, RepoInfo } from "./types";
+import type {
+  ChangeKind,
+  CommitMeta,
+  GitIdentity,
+  GraphTopologyRow,
+  RecentRepo,
+  RefsResponse,
+  RepoInfo,
+} from "./types";
 
 /** The ONLY place invoke() is called — ARCHITECTURE.md §1. */
 
@@ -35,6 +43,18 @@ export async function checkGitIdentity(): Promise<GitIdentity> {
 
 export async function setGitIdentity(name: string, email: string): Promise<void> {
   return invoke("set_git_identity", { name, email });
+}
+
+export async function getGraph(repoId: string): Promise<GraphTopologyRow[]> {
+  return invoke("get_graph", { repoId });
+}
+
+export async function getCommitMeta(repoId: string, shas: string[]): Promise<CommitMeta[]> {
+  return invoke("get_commit_meta", { repoId, shas });
+}
+
+export async function getRefs(repoId: string): Promise<RefsResponse> {
+  return invoke("get_refs", { repoId });
 }
 
 /** Subscribes to `repo://{id}/changed` — ARCHITECTURE.md §2. Returns the unlisten function. */

@@ -429,7 +429,14 @@ mod tests {
     #[test]
     fn parses_plain_version() {
         let v = parse_git_version("git version 2.43.0\n").unwrap();
-        assert_eq!(v, GitVersion { major: 2, minor: 43, patch: 0 });
+        assert_eq!(
+            v,
+            GitVersion {
+                major: 2,
+                minor: 43,
+                patch: 0
+            }
+        );
         assert!(v.is_supported());
     }
 
@@ -449,7 +456,9 @@ mod tests {
 
     #[tokio::test]
     async fn detects_real_git_version() {
-        let v = detect_git_version().await.expect("git must be on PATH for tests");
+        let v = detect_git_version()
+            .await
+            .expect("git must be on PATH for tests");
         assert!(v.major >= 2);
     }
 
@@ -475,20 +484,45 @@ mod tests {
     #[tokio::test]
     async fn git_with_progress_reports_clone_phases_and_returns_output() {
         let src = tempfile::tempdir().expect("tempdir");
-        git(src.path(), &["init", "--initial-branch=main", "-q"], GitOpts::default())
-            .await
-            .unwrap();
-        git(src.path(), &["config", "user.name", "T"], GitOpts::default())
-            .await
-            .unwrap();
-        git(src.path(), &["config", "user.email", "t@example.com"], GitOpts::default())
-            .await
-            .unwrap();
+        git(
+            src.path(),
+            &["init", "--initial-branch=main", "-q"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
+        git(
+            src.path(),
+            &["config", "user.name", "T"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
+        git(
+            src.path(),
+            &["config", "user.email", "t@example.com"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
+        git(
+            src.path(),
+            &["config", "commit.gpgsign", "false"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
         std::fs::write(src.path().join("f.txt"), "hi").unwrap();
-        git(src.path(), &["add", "-A"], GitOpts::default()).await.unwrap();
-        git(src.path(), &["commit", "-q", "-m", "init"], GitOpts::default())
+        git(src.path(), &["add", "-A"], GitOpts::default())
             .await
             .unwrap();
+        git(
+            src.path(),
+            &["commit", "-q", "-m", "init"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
 
         let parent = tempfile::tempdir().expect("tempdir");
         let dest = parent.path().join("clone-dest");
@@ -508,6 +542,9 @@ mod tests {
 
         assert_eq!(output.code, 0);
         assert!(dest.join(".git").exists());
-        assert!(!phases.is_empty(), "expected at least one progress phase to be observed");
+        assert!(
+            !phases.is_empty(),
+            "expected at least one progress phase to be observed"
+        );
     }
 }

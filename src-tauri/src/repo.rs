@@ -141,7 +141,10 @@ pub async fn open_repo(
     .await
     .map_err(|e| {
         AppError::new(
-            format!("\"{}\" doesn't look like a git repository", requested.display()),
+            format!(
+                "\"{}\" doesn't look like a git repository",
+                requested.display()
+            ),
             e.to_string(),
         )
     })?;
@@ -281,17 +284,37 @@ mod tests {
 
     #[test]
     fn repo_name_uses_final_path_component() {
-        assert_eq!(repo_name(Path::new("/Users/jamie/Developer/BranchKit")), "BranchKit");
+        assert_eq!(
+            repo_name(Path::new("/Users/jamie/Developer/BranchKit")),
+            "BranchKit"
+        );
     }
 
     async fn init_repo(dir: &Path) {
-        git(dir, &["init", "--initial-branch=main", "-q"], GitOpts::default())
+        git(
+            dir,
+            &["init", "--initial-branch=main", "-q"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
+        git(dir, &["config", "user.name", "T"], GitOpts::default())
             .await
             .unwrap();
-        git(dir, &["config", "user.name", "T"], GitOpts::default()).await.unwrap();
-        git(dir, &["config", "user.email", "t@example.com"], GitOpts::default())
-            .await
-            .unwrap();
+        git(
+            dir,
+            &["config", "user.email", "t@example.com"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
+        git(
+            dir,
+            &["config", "commit.gpgsign", "false"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -310,10 +333,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path()).await;
         std::fs::write(dir.path().join("f.txt"), "hi").unwrap();
-        git(dir.path(), &["add", "-A"], GitOpts::default()).await.unwrap();
-        git(dir.path(), &["commit", "-q", "-m", "init"], GitOpts::default())
+        git(dir.path(), &["add", "-A"], GitOpts::default())
             .await
             .unwrap();
+        git(
+            dir.path(),
+            &["commit", "-q", "-m", "init"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
         let head = git(dir.path(), &["rev-parse", "HEAD"], GitOpts::default())
             .await
             .unwrap();

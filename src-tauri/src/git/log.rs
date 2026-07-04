@@ -2,9 +2,14 @@
 //! whole repo; per-commit metadata is fetched lazily in visible-window batches. Lane assignment
 //! itself is pure TS (§5.2) and lives in the frontend.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use tauri::State;
+
+use crate::error::AppError;
+use crate::state::AppState;
 
 use super::exec::{git, GitError, GitOpts};
 
@@ -47,6 +52,21 @@ pub struct StashEntry {
     pub subject: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum GraphTopologyRow {
+    Commit {
+        sha: String,
+        parents: Vec<String>,
+    },
+    Stash {
+        sha: String,
+        base_sha: String,
+        selector: String,
+        subject: String,
+    },
+}
+
 /// Full sha+parents topology for the whole repo (`rev-list --all --topo-order --parents`) —
 /// fast even at 100k commits per ARCHITECTURE.md §5.1. Do this once; fetch metadata on demand.
 pub async fn topology(repo: &Path) -> Result<Vec<CommitTopology>, GitError> {
@@ -74,6 +94,46 @@ pub async fn topology(repo: &Path) -> Result<Vec<CommitTopology>, GitError> {
     Ok(result)
 }
 
+pub async fn graph_rows(repo: &Path) -> Result<Vec<GraphTopologyRow>, GitError> {
+    let commits = topology(repo).await?;
+    let stashes = stash_list(repo).await?;
+
+    let mut stashes_by_base: HashMap<String, Vec<StashEntry>> = HashMap::new();
+    for stash in stashes {
+        stashes_by_base
+            .entry(stash.base_sha.clone())
+            .or_default()
+            .push(stash);
+    }
+
+    let mut result = Vec::with_capacity(commits.len() + stashes_by_base.len());
+    for commit in commits {
+        result.push(GraphTopologyRow::Commit {
+            sha: commit.sha.clone(),
+            parents: commit.parents,
+        });
+        if let Some(stashes) = stashes_by_base.remove(&commit.sha) {
+            result.extend(stashes.into_iter().map(|stash| GraphTopologyRow::Stash {
+                sha: stash.sha,
+                base_sha: stash.base_sha,
+                selector: stash.selector,
+                subject: stash.subject,
+            }));
+        }
+    }
+
+    for stashes in stashes_by_base.into_values() {
+        result.extend(stashes.into_iter().map(|stash| GraphTopologyRow::Stash {
+            sha: stash.sha,
+            base_sha: stash.base_sha,
+            selector: stash.selector,
+            subject: stash.subject,
+        }));
+    }
+
+    Ok(result)
+}
+
 /// Batched metadata for `shas`, split into chunks of `METADATA_BATCH_SIZE` per ARCHITECTURE.md
 /// §5.1. Order follows the order of `shas` (git show does not reorder or walk its arguments).
 pub async fn commit_metadata(repo: &Path, shas: &[String]) -> Result<Vec<CommitMeta>, GitError> {
@@ -84,10 +144,7 @@ pub async fn commit_metadata(repo: &Path, shas: &[String]) -> Result<Vec<CommitM
     Ok(result)
 }
 
-async fn commit_metadata_chunk(
-    repo: &Path,
-    shas: &[String],
-) -> Result<Vec<CommitMeta>, GitError> {
+async fn commit_metadata_chunk(repo: &Path, shas: &[String]) -> Result<Vec<CommitMeta>, GitError> {
     if shas.is_empty() {
         return Ok(Vec::new());
     }
@@ -118,7 +175,11 @@ fn parse_commit_metadata_records(text: &str) -> Vec<CommitMeta> {
             let author_email = fields.next()?.to_string();
             let author_time: i64 = fields.next()?.trim().parse().ok()?;
             let subject = fields.next()?.to_string();
-            let body = fields.next().unwrap_or("").trim_end_matches('\n').to_string();
+            let body = fields
+                .next()
+                .unwrap_or("")
+                .trim_end_matches('\n')
+                .to_string();
             Some(CommitMeta {
                 sha,
                 parents,
@@ -156,7 +217,11 @@ pub async fn stash_list(repo: &Path) -> Result<Vec<StashEntry>, GitError> {
                 .unwrap_or_default()
                 .to_string();
             let selector = fields.next()?.to_string();
-            let subject = fields.next().unwrap_or("").trim_end_matches('\n').to_string();
+            let subject = fields
+                .next()
+                .unwrap_or("")
+                .trim_end_matches('\n')
+                .to_string();
             Some(StashEntry {
                 sha,
                 base_sha,
@@ -166,6 +231,35 @@ pub async fn stash_list(repo: &Path) -> Result<Vec<StashEntry>, GitError> {
         })
         .collect();
     Ok(entries)
+}
+
+#[tauri::command]
+pub async fn get_graph(
+    state: State<'_, AppState>,
+    repo_id: String,
+) -> Result<Vec<GraphTopologyRow>, AppError> {
+    let handle = state.get_repo(&repo_id).ok_or_else(|| {
+        AppError::new(
+            "Repository is not open",
+            format!("unknown repo id {repo_id}"),
+        )
+    })?;
+    Ok(graph_rows(&handle.path).await?)
+}
+
+#[tauri::command]
+pub async fn get_commit_meta(
+    state: State<'_, AppState>,
+    repo_id: String,
+    shas: Vec<String>,
+) -> Result<Vec<CommitMeta>, AppError> {
+    let handle = state.get_repo(&repo_id).ok_or_else(|| {
+        AppError::new(
+            "Repository is not open",
+            format!("unknown repo id {repo_id}"),
+        )
+    })?;
+    Ok(commit_metadata(&handle.path, &shas).await?)
 }
 
 #[cfg(test)]

@@ -298,9 +298,8 @@ mod tests {
 
     #[test]
     fn parses_unmerged_both_modified() {
-        let bytes = join(&[
-            "u UU N... 100644 100644 100644 100644 base ours theirs conflicted.txt",
-        ]);
+        let bytes =
+            join(&["u UU N... 100644 100644 100644 100644 base ours theirs conflicted.txt"]);
         let report = parse_status(&bytes);
         let e = &report.entries[0];
         assert_eq!(e.kind, StatusEntryKind::Unmerged);

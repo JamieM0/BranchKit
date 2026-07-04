@@ -24,7 +24,13 @@ impl GitIdentity {
 async fn get_global(key: &str) -> Result<Option<String>, GitError> {
     // `--global` config reads don't need a repo; run from the cwd (any directory works).
     let cwd = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
-    match git(&cwd, &["config", "--global", "--get", key], GitOpts::default()).await {
+    match git(
+        &cwd,
+        &["config", "--global", "--get", key],
+        GitOpts::default(),
+    )
+    .await
+    {
         Ok(output) => {
             let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
             Ok(if value.is_empty() { None } else { Some(value) })
@@ -44,7 +50,17 @@ pub async fn get_identity() -> Result<GitIdentity, GitError> {
 
 pub async fn set_identity(name: &str, email: &str) -> Result<(), GitError> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
-    git(&cwd, &["config", "--global", "user.name", name], GitOpts::default()).await?;
-    git(&cwd, &["config", "--global", "user.email", email], GitOpts::default()).await?;
+    git(
+        &cwd,
+        &["config", "--global", "user.name", name],
+        GitOpts::default(),
+    )
+    .await?;
+    git(
+        &cwd,
+        &["config", "--global", "user.email", email],
+        GitOpts::default(),
+    )
+    .await?;
     Ok(())
 }

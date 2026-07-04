@@ -27,6 +27,9 @@ pub fn run() {
             repo::list_recents,
             repo::check_git_identity,
             repo::set_git_identity,
+            git::log::get_graph,
+            git::log::get_commit_meta,
+            git::refs::get_refs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -38,6 +41,9 @@ mod tests {
 
     #[test]
     fn greet_includes_name() {
-        assert_eq!(greet("BranchKit"), "Hello, BranchKit! You've been greeted from Rust!");
+        assert_eq!(
+            greet("BranchKit"),
+            "Hello, BranchKit! You've been greeted from Rust!"
+        );
     }
 }

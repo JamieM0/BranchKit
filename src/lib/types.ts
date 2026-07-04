@@ -66,6 +66,16 @@ export interface StashEntry {
 	subject: string;
 }
 
+export type GraphTopologyRow =
+	| { kind: "commit"; sha: string; parents: string[] }
+	| {
+			kind: "stash";
+			sha: string;
+			baseSha: string;
+			selector: string;
+			subject: string;
+	  };
+
 // --- git/refs.rs ---------------------------------------------------------
 
 export type RefKind = 'branch' | 'remoteBranch' | 'tag';
@@ -90,6 +100,11 @@ export interface HeadInfo {
 	/** Short branch name, e.g. `main`. `null` when detached. */
 	branch: string | null;
 	sha: string;
+}
+
+export interface RefsResponse {
+	refs: RefInfo[];
+	head: HeadInfo;
 }
 
 // --- git/status.rs ---------------------------------------------------------

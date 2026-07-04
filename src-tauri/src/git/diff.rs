@@ -251,7 +251,10 @@ mod tests {
         assert_eq!(result.old_path, None);
         assert_eq!(result.new_path.as_deref(), Some("new.txt"));
         assert_eq!(result.hunks[0].lines.len(), 2);
-        assert!(result.hunks[0].lines.iter().all(|l| l.kind == DiffLineKind::Add));
+        assert!(result.hunks[0]
+            .lines
+            .iter()
+            .all(|l| l.kind == DiffLineKind::Add));
     }
 
     #[test]

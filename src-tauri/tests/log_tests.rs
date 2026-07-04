@@ -51,12 +51,18 @@ async fn merge_commit_has_both_parents_in_topology() {
     let merge_sha = repo.head_sha().await;
 
     let topo = log::topology(repo.path()).await.expect("topology");
-    let merge_entry = topo.iter().find(|c| c.sha == merge_sha).expect("merge commit present");
+    let merge_entry = topo
+        .iter()
+        .find(|c| c.sha == merge_sha)
+        .expect("merge commit present");
     assert_eq!(merge_entry.parents.len(), 2);
     assert!(merge_entry.parents.contains(&main_tip));
     assert!(merge_entry.parents.contains(&feature_tip));
 
-    let base_entry = topo.iter().find(|c| c.sha == base).expect("base commit present");
+    let base_entry = topo
+        .iter()
+        .find(|c| c.sha == base)
+        .expect("base commit present");
     assert!(base_entry.parents.is_empty());
 }
 
@@ -81,7 +87,9 @@ async fn criss_cross_history_topology() {
     let right_merge = repo.head_sha().await;
 
     repo.checkout("left").await;
-    repo.merge("right").await.expect("merge right into left, may itself become a merge commit");
+    repo.merge("right")
+        .await
+        .expect("merge right into left, may itself become a merge commit");
     let left_merge = repo.head_sha().await;
 
     let topo = log::topology(repo.path()).await.expect("topology");
