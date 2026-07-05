@@ -324,6 +324,14 @@
 		cursor: default;
 	}
 
+	/* No caret sibling (e.g. Publish before there's an upstream to offer push options for) —
+	   the primary button is the whole control, so give it its right border/radius back instead
+	   of leaving the edge open as if a caret were about to close it off. */
+	.split button.primary:last-child {
+		border-right: 1px solid var(--border);
+		border-radius: var(--radius-control);
+	}
+
 	.split button.caret {
 		padding: var(--space-1) var(--space-1);
 		border: 1px solid var(--border);
