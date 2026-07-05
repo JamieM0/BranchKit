@@ -8,6 +8,9 @@ import * as ipc from "$lib/ipc";
 import { toasts } from "$lib/stores/toasts.svelte";
 import { graphNav } from "$lib/stores/graphNav.svelte";
 import { graph } from "$lib/stores/graph.svelte";
+import { status } from "$lib/stores/status.svelte";
+import { commitDraft } from "$lib/stores/commitDraft.svelte";
+import { stagedRows } from "$lib/status/sections";
 
 interface AppErrorShape {
 	userMessage: string;
@@ -213,6 +216,62 @@ export async function push(repoId: string, force: boolean, branch: string): Prom
 			message: force ? `Force-pushed \`${branch}\`` : `Pushed \`${branch}\``,
 			tone: "success",
 			icon: "check",
+		});
+	} catch (e) {
+		const { userMessage, raw } = asAppError(e);
+		toasts.pushError(userMessage, raw);
+	}
+}
+
+/** Commit the current draft (DESIGN_SPEC.md §7). When `stageAllFirst` is set — the "Stage all &
+ * commit" button state (§15.16) — everything is staged before committing. On success the draft is
+ * cleared and, for a plain (non-amend) commit, the toast offers **Undo** (soft reset, §8/§15.13);
+ * amend has no clean soft-reset undo so it's omitted. Returns true so the caller can play its
+ * success sweep. */
+export async function commit(
+	repoId: string,
+	opts: { stageAllFirst: boolean },
+): Promise<boolean> {
+	const { summary, description, amend } = commitDraft;
+	if (!commitDraft.canCommit) return false;
+	try {
+		if (opts.stageAllFirst) await ipc.stageAll(repoId);
+		const sha = await ipc.commit(repoId, summary, description, amend);
+		const branch = graph.head && !graph.head.detached ? graph.head.branch : null;
+		commitDraft.reset();
+		toasts.push({
+			message: branch
+				? `Committed \`${sha.slice(0, 7)}\` to \`${branch}\``
+				: `Committed \`${sha.slice(0, 7)}\``,
+			tone: "success",
+			icon: "check",
+			action: amend ? undefined : { label: "Undo", run: () => undoCommit(repoId) },
+		});
+		return true;
+	} catch (e) {
+		const { userMessage, raw } = asAppError(e);
+		toasts.pushError(userMessage, raw);
+		return false;
+	}
+}
+
+/** The composer/WIP-row "primary" commit decision (§15.16): with staged files, commit them as-is;
+ * with only unstaged WIP, stage everything first. Used by the WIP row's Cmd+Enter and the
+ * composer's split-button default. */
+export async function commitPrimary(repoId: string): Promise<boolean> {
+	const hasStaged = stagedRows(status.report.entries).length > 0;
+	return commit(repoId, { stageAllFirst: !hasStaged });
+}
+
+/** The commit toast's **Undo** — soft-reset the last commit; its changes return to the index
+ * exactly as staged (§8/§15.13). Only ever wired up before the commit is pushed. */
+async function undoCommit(repoId: string): Promise<void> {
+	try {
+		await ipc.undoCommit(repoId);
+		toasts.push({
+			message: "Commit undone — changes are staged again",
+			tone: "info",
+			icon: "undo",
 		});
 	} catch (e) {
 		const { userMessage, raw } = asAppError(e);

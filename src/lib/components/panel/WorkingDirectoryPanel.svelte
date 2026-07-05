@@ -10,6 +10,7 @@
 	import type { DiscardedEntry } from "$lib/types";
 	import FileRow from "./FileRow.svelte";
 	import FileTree from "./FileTree.svelte";
+	import CommitComposer from "./CommitComposer.svelte";
 
 	/** Working-directory mode — DESIGN_SPEC.md §6.1. Default right-panel mode: no commit selected
 	 * in the graph (a plain click on a commit switches to commit-detail mode instead, handled by
@@ -390,6 +391,8 @@
 			{/if}
 		</section>
 	</div>
+
+	<CommitComposer />
 </div>
 
 <style>

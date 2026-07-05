@@ -194,6 +194,25 @@ export async function unstageLines(
   return invoke("unstage_lines", { repoId, path, hunkIndex, lineIndices });
 }
 
+// --- commit composer (ARCHITECTURE.md §7.1, DESIGN_SPEC.md §7) ---
+
+/** Commit the composer's summary + description. Resolves to the new HEAD sha so the toast can name
+ * it (§8). `amend` replaces the tip commit; the message goes over stdin when it exceeds ~8k chars
+ * (handled in Rust). */
+export async function commit(
+  repoId: string,
+  summary: string,
+  description: string,
+  amend: boolean,
+): Promise<string> {
+  return invoke("commit", { repoId, summary, description, amend });
+}
+
+/** The commit toast's **Undo** — a soft reset of the last commit (DESIGN_SPEC.md §8/§15.13). */
+export async function undoCommit(repoId: string): Promise<void> {
+  return invoke("undo_commit", { repoId });
+}
+
 // --- discard safety net (ARCHITECTURE.md §7.3, DESIGN_SPEC.md §7.4) ---
 
 export async function discardFile(repoId: string, path: string): Promise<void> {

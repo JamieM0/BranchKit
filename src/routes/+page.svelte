@@ -17,6 +17,7 @@
   import { diffView } from "$lib/stores/diffView.svelte";
   import { branchEdit } from "$lib/stores/branchEdit.svelte";
   import { graphNav } from "$lib/stores/graphNav.svelte";
+  import { commitDraft } from "$lib/stores/commitDraft.svelte";
 
   let showPicker = $state(false);
   let showClone = $state(false);
@@ -33,12 +34,15 @@
         graph.open(id).catch((e) => console.error(e));
         status.open(id).catch((e) => console.error(e));
         diffView.close();
+        // A half-typed commit draft shouldn't follow you into another repo (§7).
+        commitDraft.reset();
       }
     } else if (openedGraphId) {
       openedGraphId = null;
       void graph.close();
       void status.close();
       diffView.close();
+      commitDraft.reset();
     }
   });
 

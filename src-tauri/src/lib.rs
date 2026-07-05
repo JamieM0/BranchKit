@@ -58,6 +58,8 @@ pub fn run() {
             git::stage::unstage_all,
             git::stage::stage_lines,
             git::stage::unstage_lines,
+            git::commit::commit,
+            git::commit::undo_commit,
             git::discard::discard_file,
             git::discard::discard_hunk,
             git::discard::discard_all,

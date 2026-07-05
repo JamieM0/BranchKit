@@ -2,6 +2,7 @@
 //! out through `exec::git`; nothing else in the codebase should spawn `git` directly.
 
 pub mod blob;
+pub mod commit;
 pub mod diff;
 pub mod discard;
 pub mod exec;

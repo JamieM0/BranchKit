@@ -1,6 +1,7 @@
 <script lang="ts">
 	import GraphColumnHeader from "./GraphColumnHeader.svelte";
 	import GraphRow from "./GraphRow.svelte";
+	import WipGraphRow from "./WipGraphRow.svelte";
 	import DetachGuardPopover from "./DetachGuardPopover.svelte";
 	import AheadBehindPopover from "./AheadBehindPopover.svelte";
 	import BranchMenu from "./BranchMenu.svelte";
@@ -19,8 +20,11 @@
 	import type { GraphSegment, SegmentEnd } from "$lib/graph/lanes";
 	import type { Pill } from "$lib/graph/pills";
 	import { graph } from "$lib/stores/graph.svelte";
+	import { status } from "$lib/stores/status.svelte";
 	import { graphSelection } from "$lib/stores/graphSelection.svelte";
 	import { graphView } from "$lib/stores/graphView.svelte";
+	import { buildWipRow, WIP_SHA, type WipRow } from "$lib/graph/wip";
+	import type { GraphViewRow } from "$lib/stores/graph.svelte";
 	import { branchEdit } from "$lib/stores/branchEdit.svelte";
 	import { dnd } from "$lib/stores/dnd.svelte";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
@@ -86,10 +90,28 @@
 	const avatars = new AvatarCache(() => requestDraw());
 
 	const rows = $derived(graph.rows);
-	const range = $derived(visibleRowRange(scrollTop, viewportHeight, rows.length));
-	const visibleRows = $derived(rows.slice(range.start, range.end));
 	const headSha = $derived(graph.head?.sha ?? null);
 	const detached = $derived(graph.head?.detached ?? false);
+
+	// The WIP row (§4.2) is synthesized here, not in the store, so the store stays a pure topology
+	// projection. It hangs off HEAD's lane; `allRows` is what the canvas, virtualization and DOM all
+	// index against, so the +1 offset it introduces stays consistent everywhere.
+	const headLane = $derived(rows.find((r) => r.sha === headSha)?.node.lane ?? 0);
+	const wipRow = $derived<WipRow | null>(
+		status.report.entries.length > 0 && headSha
+			? buildWipRow(headLane, status.report.entries)
+			: null,
+	);
+	const allRows = $derived<(WipRow | GraphViewRow)[]>(wipRow ? [wipRow, ...rows] : rows);
+	const wipOffset = $derived(wipRow ? 1 : 0);
+
+	const range = $derived(visibleRowRange(scrollTop, viewportHeight, allRows.length));
+	const visibleRows = $derived(allRows.slice(range.start, range.end));
+
+	// Slide-in only on genuine appearance (working tree goes dirty), never on scroll (§4.2).
+	let wipEnter = $state(false);
+	let wipWasVisible = false;
+	let wipEnterTimer: ReturnType<typeof setTimeout> | undefined;
 	const showSkeleton = $derived(graph.loading && rows.length === 0);
 	const showEmpty = $derived(!graph.loading && rows.length === 0 && graph.repoId !== null);
 
@@ -133,7 +155,7 @@
 	 * ancestry line brightens while everything else dims. */
 	function lineageKeys(sha: string): Set<string> {
 		const lit = new Set<string>();
-		const laneRows = graph.laneRows;
+		const laneRows = allRows;
 		let idx = shaIndex.get(sha);
 		let guard = 0;
 		while (idx !== undefined && guard++ < laneRows.length + 1) {
@@ -175,13 +197,27 @@
 		ctx.fillText(text, x, y + 0.5);
 	}
 
-	function drawNode(ctx: CanvasRenderingContext2D, row: (typeof rows)[number], x: number, y: number, c: Colors) {
+	function drawNode(ctx: CanvasRenderingContext2D, row: WipRow | GraphViewRow, x: number, y: number, c: Colors) {
 		// A background halo so lane lines don't cut across the node.
 		const haloR = row.kind === "stash" ? STASH_NODE_RADIUS + 2 : AVATAR_RADIUS + 1;
 		ctx.beginPath();
 		ctx.arc(x, y, haloR, 0, Math.PI * 2);
 		ctx.fillStyle = c.bg;
 		ctx.fill();
+
+		if (row.kind === "wip") {
+			// Dashed hollow node — DESIGN_SPEC.md §4.2.
+			ctx.beginPath();
+			ctx.arc(x, y, AVATAR_RADIUS - 2, 0, Math.PI * 2);
+			ctx.fillStyle = c.bg;
+			ctx.fill();
+			ctx.setLineDash([2, 2]);
+			ctx.strokeStyle = c.muted;
+			ctx.lineWidth = 1.5;
+			ctx.stroke();
+			ctx.setLineDash([]);
+			return;
+		}
 
 		if (row.kind === "stash") {
 			ctx.beginPath();
@@ -253,7 +289,6 @@
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		ctx.clearRect(0, 0, cssW, cssH);
 
-		const allRows = graph.rows;
 		const st = scrollEl ? scrollEl.scrollTop : scrollTop;
 		const win = visibleRowRange(st, cssH, allRows.length);
 		const c = colors();
@@ -322,7 +357,7 @@
 		const st = scrollEl.scrollTop;
 		scrollTop = st;
 		const topIndex = Math.floor(st / ROW_HEIGHT);
-		const row = graph.rows[topIndex];
+		const row = allRows[topIndex];
 		anchor = { sha: row?.sha ?? null, offset: st - topIndex * ROW_HEIGHT };
 		requestDraw();
 	}
@@ -340,14 +375,18 @@
 	}
 
 	function moveSelection(delta: number) {
-		const allRows = graph.rows;
 		if (allRows.length === 0) return;
 		const current = graphSelection.selectedSha ? shaIndex.get(graphSelection.selectedSha) : undefined;
 		let idx = current === undefined ? (delta > 0 ? 0 : allRows.length - 1) : current + delta;
 		idx = Math.max(0, Math.min(allRows.length - 1, idx));
 		const sha = allRows[idx].sha;
-		graphSelection.select(sha);
-		onSelectCommit?.(sha);
+		if (sha === WIP_SHA) {
+			// Landing on the WIP row selects working-directory mode, not a commit (§4.2).
+			graphSelection.clear();
+		} else {
+			graphSelection.select(sha);
+			onSelectCommit?.(sha);
+		}
 		scrollRowIntoView(idx);
 	}
 
@@ -379,9 +418,15 @@
 		}
 	}
 
+	/** Clicking the WIP row body (not the `// WIP` text) → working-directory mode (§4.2). */
+	function handleWipSelect() {
+		scrollEl?.focus();
+		graphSelection.clear();
+	}
+
 	function handleActivate(sha: string, e: MouseEvent) {
-		const row = graph.rows[shaIndex.get(sha) ?? -1];
-		if (row?.kind === "stash") return; // Pop-with-undo arrives with the stash menu (prompt 11).
+		const row = allRows[shaIndex.get(sha) ?? -1];
+		if (row?.kind === "stash" || row?.kind === "wip") return; // stash pop / WIP have no detach.
 		// Double-click a commit → detached checkout, guarded (§4.6). "Don't ask again" skips the popover.
 		if (graphView.detachDontAsk) {
 			if (repoId) void actions.checkoutDetached(repoId, sha);
@@ -453,7 +498,7 @@
 
 	// Redraw whenever the data, layout, hover or scroll offset changes; rAF coalesces bursts.
 	$effect(() => {
-		void graph.rows;
+		void allRows;
 		void graph.metaBySha;
 		void graphView.widths.branch;
 		void graphView.widths.graph;
@@ -463,10 +508,27 @@
 		requestDraw();
 	});
 
-	// Lazy-load metadata for the visible window (+ overscan) — ARCHITECTURE.md §5.1.
+	// Lazy-load metadata for the visible window (+ overscan) — ARCHITECTURE.md §5.1. The window is
+	// in `allRows` space; shift it back by the WIP row so it indexes the store's commit rows.
 	$effect(() => {
 		const { start, end } = range;
-		if (graph.repoId) void graph.ensureMetadataForWindow(start, end);
+		if (graph.repoId)
+			void graph.ensureMetadataForWindow(Math.max(0, start - wipOffset), Math.max(0, end - wipOffset));
+	});
+
+	// Fire the WIP row's slide-in only when the working tree genuinely goes dirty (§4.2).
+	// SPEC-DEVIATION (§4.2 "commit animates WIP → new commit row"): the literal morph of the WIP
+	// row into the freshly-created commit row would need a FLIP across the canvas-drawn node layer,
+	// which the virtualized canvas graph can't animate. It's approximated by the WIP row's slide-in
+	// on reappearance plus the composer's 240ms success sweep; the row itself just swaps on refresh.
+	$effect(() => {
+		const visible = wipRow !== null;
+		if (visible && !wipWasVisible) {
+			wipEnter = true;
+			clearTimeout(wipEnterTimer);
+			wipEnterTimer = setTimeout(() => (wipEnter = false), 240);
+		}
+		wipWasVisible = visible;
 	});
 
 	// Flash-scroll to a commit on request (panel click-to-tip, badge "view commits", merge "View").
@@ -479,10 +541,10 @@
 	// Rebuild the sha→index map on topology reloads and restore the viewport to the anchored sha so
 	// refreshes never move what you're looking at — DESIGN_SPEC.md §4.7 / §15.32.
 	$effect(() => {
-		const laneRows = graph.laneRows;
+		const rowsForIndex = allRows;
 		const cc = graph.laneComputeCount;
 		const map = new Map<string, number>();
-		for (let i = 0; i < laneRows.length; i += 1) map.set(laneRows[i].sha, i);
+		for (let i = 0; i < rowsForIndex.length; i += 1) map.set(rowsForIndex[i].sha, i);
 		shaIndex = map;
 		if (cc !== lastCompute) {
 			const previous = lastCompute;
@@ -572,29 +634,33 @@
 				tabindex="0"
 				role="grid"
 				aria-label="Commit graph"
-				aria-rowcount={rows.length}
+				aria-rowcount={allRows.length}
 				onscroll={onScroll}
 				onkeydown={onKeydown}
 			>
-				<div class="graph-spacer" style="height: {totalHeight(rows.length)}px;">
+				<div class="graph-spacer" style="height: {totalHeight(allRows.length)}px;">
 					<div class="graph-rows" style="transform: translateY({range.start * ROW_HEIGHT}px);">
 						{#each visibleRows as row (row.sha)}
-							<GraphRow
-								{row}
-								{repoId}
-								selected={graphSelection.selectedSha === row.sha}
-								head={row.sha === headSha}
-								onSelect={handleSelect}
-								onActivate={handleActivate}
-								onHover={(sha) => (hoveredSha = sha)}
-								onCopySha={handleCopySha}
-								onPillSelect={handlePillSelect}
-								onPillCheckout={handlePillCheckout}
-								onPillBadge={handlePillBadge}
-								onPillMenu={handlePillMenu}
-								onPillDrop={handlePillDrop}
-								onRowDrop={handleRowDrop}
-							/>
+							{#if row.kind === "wip"}
+								<WipGraphRow {row} {repoId} animateIn={wipEnter} onSelect={handleWipSelect} />
+							{:else}
+								<GraphRow
+									{row}
+									{repoId}
+									selected={graphSelection.selectedSha === row.sha}
+									head={row.sha === headSha}
+									onSelect={handleSelect}
+									onActivate={handleActivate}
+									onHover={(sha) => (hoveredSha = sha)}
+									onCopySha={handleCopySha}
+									onPillSelect={handlePillSelect}
+									onPillCheckout={handlePillCheckout}
+									onPillBadge={handlePillBadge}
+									onPillMenu={handlePillMenu}
+									onPillDrop={handlePillDrop}
+									onRowDrop={handleRowDrop}
+								/>
+							{/if}
 						{/each}
 					</div>
 				</div>
