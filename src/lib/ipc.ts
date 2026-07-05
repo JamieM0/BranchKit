@@ -330,9 +330,10 @@ export async function getConflictState(repoId: string): Promise<ConflictState | 
 }
 
 /** Continue the in-progress operation — the banner's "Continue merge" (and rebase/cherry-pick/
- * revert equivalents), DESIGN_SPEC.md §9.1. */
-export async function continueConflict(repoId: string): Promise<void> {
-  return invoke("continue_conflict", { repoId });
+ * revert equivalents), DESIGN_SPEC.md §9.1/§9.2. `message` edits the merge commit's message (the
+ * inline field); it's ignored by the kinds whose `--continue` reuses a stored message. */
+export async function continueConflict(repoId: string, message?: string): Promise<void> {
+  return invoke("continue_conflict", { repoId, message: message ?? null });
 }
 
 /** Abort the in-progress operation — the banner's "Abort…" (DESIGN_SPEC.md §9.1/§9.3). */

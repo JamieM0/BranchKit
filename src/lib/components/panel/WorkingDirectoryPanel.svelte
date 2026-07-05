@@ -12,6 +12,7 @@
 	import FileRow from "./FileRow.svelte";
 	import FileTree from "./FileTree.svelte";
 	import CommitComposer from "./CommitComposer.svelte";
+	import ConflictedFilesSection from "$lib/components/keep-panel/ConflictedFilesSection.svelte";
 
 	/** Working-directory mode — DESIGN_SPEC.md §6.1. Default right-panel mode: no commit selected
 	 * in the graph (a plain click on a commit switches to commit-detail mode instead, handled by
@@ -319,6 +320,7 @@
 	{/if}
 
 	<div class="sections">
+		<ConflictedFilesSection />
 		<section>
 			<div class="section-head">
 				<span>UNSTAGED <span class="count">{unstagedSorted.length}</span></span>

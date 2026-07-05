@@ -19,18 +19,18 @@ export interface KeptItem {
 	lines: string[];
 }
 
-interface ContextRegionState {
+export interface ContextRegionState {
 	kind: "context";
 	lines: string[];
 }
 
-interface AutoResolvedRegionState {
+export interface AutoResolvedRegionState {
 	kind: "autoResolved";
 	side: Side;
 	lines: string[];
 }
 
-interface ConflictRegionState {
+export interface ConflictRegionState {
 	kind: "conflict";
 	baseStart: number;
 	baseEnd: number;
@@ -46,7 +46,7 @@ interface ConflictRegionState {
 	touched: boolean;
 }
 
-type RegionState = ContextRegionState | AutoResolvedRegionState | ConflictRegionState;
+export type RegionState = ContextRegionState | AutoResolvedRegionState | ConflictRegionState;
 
 export interface FileProgress {
 	resolved: number;
@@ -122,6 +122,22 @@ export class KeepPanelStore {
 		const region = this.#conflictRegion(regionIndex);
 		region.kept = region.kept.filter((k) => k.id !== keptId);
 		region.touched = true;
+	}
+
+	/** Unkeep everything in a region in one shot — the keyboard `u` (DESIGN_SPEC.md §9.3). Like a
+	 * per-item unkeep, this is still a decision (the region stays `touched`: "nothing kept" is a
+	 * legal, explicit resolution, §9.2); use `resetRegion`/`resetFile` to go back to undecided. */
+	unkeepAll(regionIndex: number) {
+		const region = this.#conflictRegion(regionIndex);
+		region.kept = [];
+		region.touched = true;
+	}
+
+	/** Return a single region to its undecided, all-candidates state (clears `touched`). */
+	resetRegion(regionIndex: number) {
+		const region = this.#conflictRegion(regionIndex);
+		region.kept = [];
+		region.touched = false;
 	}
 
 	/** Reorders a kept item within its region's click-order stack — the ↑↓ reorder handles (§9.2). */
@@ -208,6 +224,38 @@ export class KeepPanelStore {
 	get allResolved(): boolean {
 		const { resolved, total } = this.fileProgress;
 		return resolved === total;
+	}
+
+	/** The 1-based document line number each region's *first real line* lands on, given the current
+	 * kept state — the live-renumbering feedback loop (DESIGN_SPEC.md §9.3). Reactive: keeping a
+	 * block shifts every later region's start down immediately, so the file visibly "heals". A
+	 * conflict region's real lines are its `sameBothPrefix` + kept (click order) + `sameBothSuffix`;
+	 * a context/auto region's are just its `lines`. */
+	get regionLineStarts(): number[] {
+		const starts: number[] = [];
+		let n = 1;
+		for (const region of this.regions) {
+			starts.push(n);
+			if (region.kind === "context" || region.kind === "autoResolved") {
+				n += region.lines.length;
+			} else {
+				n +=
+					region.sameBothPrefix.length +
+					region.kept.reduce((sum, k) => sum + k.lines.length, 0) +
+					region.sameBothSuffix.length;
+			}
+		}
+		return starts;
+	}
+
+	/** Indices of the still-unresolved conflict regions, in document order — the set `n`/`p` cycle
+	 * through and the source of the "Confirm file" gate (DESIGN_SPEC.md §9.2). */
+	get unresolvedRegionIndices(): number[] {
+		const out: number[] = [];
+		this.regions.forEach((region, i) => {
+			if (region.kind === "conflict" && !region.touched) out.push(i);
+		});
+		return out;
 	}
 }
 

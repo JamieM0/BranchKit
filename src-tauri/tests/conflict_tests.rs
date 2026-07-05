@@ -281,7 +281,7 @@ async fn continue_and_abort_work_for_a_merge_conflict() {
     assert!(repo.merge("feature").await.is_err());
     repo.write("f.txt", "one\nTWO-RESOLVED\n");
     repo.stage(&["f.txt"]).await;
-    conflict::continue_conflict_impl(repo.path()).await.expect("continue should succeed");
+    conflict::continue_conflict_impl(repo.path(), None).await.expect("continue should succeed");
     assert!(conflict::detect_conflict_state(repo.path()).await.unwrap().is_none());
     let head = repo.run(&["rev-list", "--parents", "-n1", "HEAD"]).await;
     let parents = String::from_utf8_lossy(&head.stdout);
@@ -323,7 +323,7 @@ async fn continue_and_abort_work_for_a_cherry_pick_conflict() {
     assert!(pick.is_err());
     repo.write("f.txt", "one\nTWO-RESOLVED\n");
     repo.stage(&["f.txt"]).await;
-    conflict::continue_conflict_impl(repo.path()).await.expect("continue should succeed");
+    conflict::continue_conflict_impl(repo.path(), None).await.expect("continue should succeed");
     assert!(conflict::detect_conflict_state(repo.path()).await.unwrap().is_none());
     let subject = repo.run(&["log", "-1", "--format=%s"]).await;
     assert_eq!(

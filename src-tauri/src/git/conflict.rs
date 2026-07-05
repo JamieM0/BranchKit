@@ -222,7 +222,7 @@ pub async fn get_conflict_state(
 /// `GIT_EDITOR=true` so git never opens an editor (ARCHITECTURE.md §7.4). A stash-apply conflict
 /// has no "continue" of its own — once every file is resolved and staged there's nothing left for
 /// git to do.
-pub async fn continue_conflict_impl(repo: &Path) -> Result<(), GitError> {
+pub async fn continue_conflict_impl(repo: &Path, message: Option<&str>) -> Result<(), GitError> {
     let current = detect_conflict_state(repo).await?.ok_or_else(|| GitError {
         code: None,
         stderr: "no active conflict state".to_string(),
@@ -231,9 +231,18 @@ pub async fn continue_conflict_impl(repo: &Path) -> Result<(), GitError> {
     })?;
     let editor_env = [("GIT_EDITOR", "true")];
     match current.kind {
-        ConflictKind::Merge => {
-            git_with_env(repo, &["commit", "--no-edit"], GitOpts::default(), &editor_env).await?;
-        }
+        // The merge commit is the one place an edited message applies — DESIGN_SPEC.md §9.2's
+        // inline "editable in a compact inline field" message. A blank/absent message falls back
+        // to git's prefilled `MERGE_MSG` (`--no-edit`). Rebase/cherry-pick/revert reuse their own
+        // stored messages and take no `-m` on `--continue`, so `message` is ignored for them.
+        ConflictKind::Merge => match message.map(str::trim).filter(|m| !m.is_empty()) {
+            Some(msg) => {
+                git_with_env(repo, &["commit", "-m", msg], GitOpts::default(), &editor_env).await?;
+            }
+            None => {
+                git_with_env(repo, &["commit", "--no-edit"], GitOpts::default(), &editor_env).await?;
+            }
+        },
         ConflictKind::Rebase => {
             git_with_env(repo, &["rebase", "--continue"], GitOpts::default(), &editor_env).await?;
         }
@@ -254,6 +263,7 @@ pub async fn continue_conflict(
     app: AppHandle,
     state: State<'_, AppState>,
     repo_id: String,
+    message: Option<String>,
 ) -> Result<(), AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
@@ -263,7 +273,7 @@ pub async fn continue_conflict(
         WatchedKind::WorkingTree,
         WatchedKind::Index,
     ]);
-    let result = continue_conflict_impl(&handle.path).await;
+    let result = continue_conflict_impl(&handle.path, message.as_deref()).await;
     emit_changes(
         &app,
         &repo_id,

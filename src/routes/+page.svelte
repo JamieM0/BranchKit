@@ -6,6 +6,7 @@
   import RepoTabs from "$lib/components/shell/RepoTabs.svelte";
   import Toolbar from "$lib/components/shell/Toolbar.svelte";
   import ConflictBanner from "$lib/components/keep-panel/ConflictBanner.svelte";
+  import KeepPanel from "$lib/components/keep-panel/KeepPanel.svelte";
   import GraphView from "$lib/components/graph/GraphView.svelte";
   import LeftPanel from "$lib/components/panel/LeftPanel.svelte";
   import RightPanel from "$lib/components/panel/RightPanel.svelte";
@@ -22,6 +23,7 @@
   import { branchEdit } from "$lib/stores/branchEdit.svelte";
   import { graphNav } from "$lib/stores/graphNav.svelte";
   import { commitDraft } from "$lib/stores/commitDraft.svelte";
+  import { keepSession } from "$lib/stores/keepSession.svelte";
   import { network, retryOnFocus } from "$lib/stores/network.svelte";
   import { notifyBehindIncrease, resetBehindTracking } from "$lib/stores/behindNotifier";
   import * as actions from "$lib/actions";
@@ -50,6 +52,7 @@
         openedGraphId = id;
         graph.open(id).catch((e) => console.error(e));
         status.open(id).catch((e) => console.error(e));
+        keepSession.open(id).catch((e) => console.error(e));
         diffView.close();
         // A half-typed commit draft shouldn't follow you into another repo (§7).
         commitDraft.reset();
@@ -59,6 +62,7 @@
       openedGraphId = null;
       void graph.close();
       void status.close();
+      void keepSession.close();
       diffView.close();
       commitDraft.reset();
     }
@@ -166,7 +170,9 @@
       {#if repos.active}
         <LeftPanel />
         <div class="graph-area">
-          {#if diffView.target}
+          {#if keepSession.panelOpen}
+            <KeepPanel />
+          {:else if diffView.target}
             <DiffViewer target={diffView.target} onBack={() => diffView.close()} />
           {:else}
             <GraphView
