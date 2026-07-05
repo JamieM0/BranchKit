@@ -5,6 +5,7 @@
   import RepoPicker from "$lib/components/shell/RepoPicker.svelte";
   import RepoTabs from "$lib/components/shell/RepoTabs.svelte";
   import Toolbar from "$lib/components/shell/Toolbar.svelte";
+  import ConflictBanner from "$lib/components/keep-panel/ConflictBanner.svelte";
   import GraphView from "$lib/components/graph/GraphView.svelte";
   import LeftPanel from "$lib/components/panel/LeftPanel.svelte";
   import RightPanel from "$lib/components/panel/RightPanel.svelte";
@@ -159,6 +160,7 @@
     {/if}
     {#if repos.active}
       <Toolbar repoId={repos.active.id} />
+      <ConflictBanner repoId={repos.active.id} />
     {/if}
     <div class="content">
       {#if repos.active}

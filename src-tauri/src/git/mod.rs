@@ -3,6 +3,7 @@
 
 pub mod blob;
 pub mod commit;
+pub mod conflict;
 pub mod diff;
 pub mod discard;
 pub mod exec;

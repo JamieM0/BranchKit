@@ -5,8 +5,10 @@ import type {
   ChangedFile,
   ChangeKind,
   CommitMeta,
+  ConflictState,
   DiscardedEntry,
   Divergence,
+  FileConflictRegions,
   FileDiff,
   GitIdentity,
   GraphTopologyRow,
@@ -318,6 +320,40 @@ export async function listDiscarded(repoId: string): Promise<DiscardedEntry[]> {
 
 export async function restoreDiscarded(repoId: string, entryId: string): Promise<void> {
   return invoke("restore_discarded", { repoId, entryId });
+}
+
+// --- conflicts / Keep Panel (ARCHITECTURE.md §7.4/§7.5, DESIGN_SPEC.md §9) ---
+
+/** `null` when the working tree has no conflict of any kind active. */
+export async function getConflictState(repoId: string): Promise<ConflictState | null> {
+  return invoke("get_conflict_state", { repoId });
+}
+
+/** Continue the in-progress operation — the banner's "Continue merge" (and rebase/cherry-pick/
+ * revert equivalents), DESIGN_SPEC.md §9.1. */
+export async function continueConflict(repoId: string): Promise<void> {
+  return invoke("continue_conflict", { repoId });
+}
+
+/** Abort the in-progress operation — the banner's "Abort…" (DESIGN_SPEC.md §9.1/§9.3). */
+export async function abortConflict(repoId: string): Promise<void> {
+  return invoke("abort_conflict", { repoId });
+}
+
+/** A conflicted file's Keep Panel regions (ARCHITECTURE.md §7.5). */
+export async function getConflictRegions(repoId: string, path: string): Promise<FileConflictRegions> {
+  return invoke("get_conflict_regions", { repoId, path });
+}
+
+/** Writes the Keep Panel's assembled resolved text and stages it — the panel's Confirm button
+ * (DESIGN_SPEC.md §9.2). */
+export async function confirmFile(repoId: string, path: string, resolvedText: string): Promise<void> {
+  return invoke("confirm_file", { repoId, path, resolvedText });
+}
+
+/** Regenerates the conflict for a previously-confirmed file — "Reset file" (DESIGN_SPEC.md §9.2). */
+export async function reopenFile(repoId: string, path: string): Promise<void> {
+  return invoke("reopen_file", { repoId, path });
 }
 
 // --- diffs (ARCHITECTURE.md §6.2) ---

@@ -177,8 +177,26 @@ fn kill_process_group(pid: u32) {
 /// group if it's exceeded. See module docs / ARCHITECTURE.md §3 for the non-negotiable rules.
 pub async fn git(repo: &Path, args: &[&str], opts: GitOpts) -> Result<GitOutput, GitError> {
     let cmd_summary = format!("git {}", args.join(" "));
-    let mut command = build_command(repo, args);
+    let command = build_command(repo, args);
+    run_git(command, cmd_summary, opts).await
+}
 
+/// Like [`git`], but with extra environment variables set on top of the base config — e.g.
+/// `GIT_EDITOR=true` for conflict continue commands (`git commit`/`rebase --continue`/etc.) so
+/// git never blocks trying to open an editor (ARCHITECTURE.md §7.4).
+pub async fn git_with_env(
+    repo: &Path,
+    args: &[&str],
+    opts: GitOpts,
+    envs: &[(&str, &str)],
+) -> Result<GitOutput, GitError> {
+    let cmd_summary = format!("git {}", args.join(" "));
+    let mut command = build_command(repo, args);
+    command.envs(envs.iter().copied());
+    run_git(command, cmd_summary, opts).await
+}
+
+async fn run_git(mut command: Command, cmd_summary: String, opts: GitOpts) -> Result<GitOutput, GitError> {
     let mut child = command
         .spawn()
         .map_err(|e| GitError::spawn(&cmd_summary, e))?;

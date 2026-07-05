@@ -40,6 +40,10 @@ dashmap = "6"
 # §6.2 "side-by-side before/after") into a data-URI-safe string for the JSON IPC bridge — the
 # smallest, dependency-free way to move binary bytes across `invoke()`.
 base64 = "0.22"
+# Myers diff for the Keep Panel's region computer (ARCHITECTURE.md §7.5: "use the `similar` crate,
+# Myers") — diffs base-vs-ours and base-vs-theirs so conflict regions are computed structurally
+# instead of by parsing `<<<<<<<` markers.
+similar = "3"
 
 [target.'cfg(unix)'.dependencies]
 # process-group kill on timeout (ARCHITECTURE.md §3 rule 3)

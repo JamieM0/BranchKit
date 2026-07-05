@@ -258,3 +258,43 @@ export interface DiscardedEntry {
 	/** Unix milliseconds. */
 	createdAtMs: number;
 }
+
+// --- git/conflict.rs ---------------------------------------------------------
+
+export type ConflictKind = "merge" | "rebase" | "cherryPick" | "revert" | "stashApply";
+
+/** The in-progress operation blocking the working tree — ARCHITECTURE.md §7.4, DESIGN_SPEC.md §9.1.
+ * Labels are always real branch/commit names, never "ours/theirs" (DESIGN_SPEC.md §4 principle 4). */
+export interface ConflictState {
+	kind: ConflictKind;
+	sourceLabel: string;
+	targetLabel: string;
+	files: string[];
+}
+
+export type Side = "ours" | "theirs";
+
+/** One span of a conflicted file's future content — ARCHITECTURE.md §7.5. Never derived from
+ * `<<<<<<<` markers; computed structurally from a 3-way diff against the base. */
+export type FileRegion =
+	| { kind: "context"; lines: string[] }
+	| { kind: "autoResolved"; side: Side; lines: string[] }
+	| {
+			kind: "conflict";
+			baseStart: number;
+			baseEnd: number;
+			/** Lines identical on both sides, peeled off the region's edges (DESIGN_SPEC.md §9.3
+			 * "same in both" dedupe) so only the genuinely divergent middle needs a decision. */
+			sameBothPrefix: string[];
+			oursLines: string[];
+			theirsLines: string[];
+			sameBothSuffix: string[];
+	  };
+
+export interface FileConflictRegions {
+	/** The file doesn't exist in `ours` (stage `:2:`) — a modify/delete conflict, this side deleted it. */
+	oursDeleted: boolean;
+	/** Same, for `theirs` (stage `:3:`). */
+	theirsDeleted: boolean;
+	regions: FileRegion[];
+}

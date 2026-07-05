@@ -117,6 +117,12 @@ pub fn run() {
             git::diff::create_patch_from_commit,
             git::diff::create_patch_from_file,
             git::blob::get_blob,
+            git::conflict::get_conflict_state,
+            git::conflict::continue_conflict,
+            git::conflict::abort_conflict,
+            git::conflict::get_conflict_regions,
+            git::conflict::confirm_file,
+            git::conflict::reopen_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
