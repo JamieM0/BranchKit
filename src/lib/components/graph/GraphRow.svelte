@@ -30,6 +30,7 @@
 		onPillMenu,
 		onPillDrop,
 		onRowDrop,
+		onRowMenu,
 	}: {
 		row: GraphViewRow;
 		selected?: boolean;
@@ -45,6 +46,7 @@
 		onPillMenu: (pill: Pill, x: number, y: number) => void;
 		onPillDrop: (pill: Pill) => void;
 		onRowDrop: (sha: string) => void;
+		onRowMenu?: (row: GraphViewRow, x: number, y: number) => void;
 	} = $props();
 
 	let expanded = $state(false);
@@ -98,6 +100,13 @@
 		e.preventDefault();
 		onRowDrop(row.sha);
 	}
+
+	function handleContextMenu(e: MouseEvent) {
+		if (!onRowMenu) return;
+		e.preventDefault();
+		e.stopPropagation();
+		onRowMenu(row, e.clientX, e.clientY);
+	}
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
@@ -121,6 +130,7 @@
 	ondragover={onRowDragOver}
 	ondragleave={onRowDragLeave}
 	ondrop={handleRowDrop}
+	oncontextmenu={handleContextMenu}
 >
 	<div class="cell branch" style="width: {graphView.widths.branch}px;">
 		{#if editingHere && branchEdit.mode === "create" && repoId}

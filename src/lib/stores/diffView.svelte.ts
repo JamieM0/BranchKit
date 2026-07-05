@@ -8,7 +8,8 @@ export type DiffSource =
 	| { kind: "workingTree" }
 	| { kind: "staged" }
 	| { kind: "commit"; sha: string }
-	| { kind: "compare"; a: string; b: string };
+	| { kind: "compare"; a: string; b: string }
+	| { kind: "commitVsWorking"; sha: string };
 
 export interface DiffTarget {
 	path: string;

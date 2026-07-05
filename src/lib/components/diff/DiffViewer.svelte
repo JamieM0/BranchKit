@@ -168,6 +168,8 @@
 				return `${target.source.sha.slice(0, 7)}`;
 			case "compare":
 				return `${target.source.a.slice(0, 7)} ↔ ${target.source.b.slice(0, 7)}`;
+			case "commitVsWorking":
+				return `${target.source.sha.slice(0, 7)} ↔ Working directory`;
 		}
 	}
 
@@ -182,6 +184,8 @@
 				return { before: `${target.source.sha}^`, after: target.source.sha };
 			case "compare":
 				return { before: target.source.a, after: target.source.b };
+			case "commitVsWorking":
+				return { before: target.source.sha, after: null };
 		}
 	}
 
@@ -212,6 +216,9 @@
 					break;
 				case "compare":
 					result = await ipc.getDiffTwoCommits(id, target.source.a, target.source.b, path, iw);
+					break;
+				case "commitVsWorking":
+					result = await ipc.getDiffCommitVsWorking(id, target.source.sha, path, iw);
 					break;
 			}
 			diff = result;

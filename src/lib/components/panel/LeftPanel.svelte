@@ -10,6 +10,8 @@
 	import { branchEdit } from "$lib/stores/branchEdit.svelte";
 	import * as actions from "$lib/actions";
 	import BranchMenu from "$lib/components/graph/BranchMenu.svelte";
+	import StashMenu from "$lib/components/graph/StashMenu.svelte";
+	import ContextMenu, { type MenuItem } from "$lib/components/shell/ContextMenu.svelte";
 
 	/** The left panel — DESIGN_SPEC.md §5. Sections LOCAL / REMOTES / TAGS / STASHES / WORKTREES with
 	 * one universal filter box that fuzzy-filters every section and dims the graph (§15.24), the
@@ -100,6 +102,27 @@
 
 	// --- overlay + interactions ---
 	let menu = $state<{ pill: Pill; x: number; y: number } | null>(null);
+	let stashMenu = $state<{ selector: string; subject: string; x: number; y: number } | null>(null);
+	let tagMenu = $state<{ name: string; x: number; y: number } | null>(null);
+
+	function openStashMenu(selector: string, subject: string, e: MouseEvent) {
+		e.preventDefault();
+		stashMenu = { selector, subject, x: e.clientX, y: e.clientY };
+	}
+
+	function openTagMenu(name: string, e: MouseEvent) {
+		e.preventDefault();
+		tagMenu = { name, x: e.clientX, y: e.clientY };
+	}
+
+	const tagMenuItems: MenuItem[] = $derived(
+		tagMenu && repoId
+			? [
+					{ type: "action", label: "Copy tag name", run: () => void actions.copyToClipboard(tagMenu!.name, "Copied tag name") },
+					{ type: "action", label: "Delete tag", danger: true, run: () => void actions.deleteTag(repoId!, tagMenu!.name) },
+				]
+			: [],
+	);
 
 	function onRowHover(sha: string | null) {
 		graphNav.setGlow(sha);
@@ -225,7 +248,13 @@
 					{#if sectionOpen("tags")}
 						{#each tags as tag (tag.shortName)}
 							<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-							<div class="row" onclick={() => onRowClick(tag.sha)} onmouseenter={() => onRowHover(tag.sha)} onmouseleave={() => onRowHover(null)}>
+							<div
+								class="row"
+								onclick={() => onRowClick(tag.sha)}
+								onmouseenter={() => onRowHover(tag.sha)}
+								onmouseleave={() => onRowHover(null)}
+								oncontextmenu={(e) => openTagMenu(tag.shortName, e)}
+							>
 								<span class="presence" aria-hidden="true">🏷</span>
 								<span class="name">{tag.shortName}</span>
 							</div>
@@ -244,7 +273,14 @@
 					{#if sectionOpen("stashes")}
 						{#each stashes as stash (stash.selector)}
 							<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-							<div class="row" onclick={() => onRowClick(stash.baseSha)} onmouseenter={() => onRowHover(stash.baseSha)} onmouseleave={() => onRowHover(null)}>
+							<div
+								class="row"
+								onclick={() => onRowClick(stash.baseSha)}
+								ondblclick={() => repoId && actions.popStash(repoId, stash.selector, stash.subject)}
+								onmouseenter={() => onRowHover(stash.baseSha)}
+								onmouseleave={() => onRowHover(null)}
+								oncontextmenu={(e) => openStashMenu(stash.selector, stash.subject, e)}
+							>
 								<span class="presence" aria-hidden="true">📦</span>
 								<span class="name stash">{stash.subject || stash.selector}</span>
 							</div>
@@ -286,6 +322,21 @@
 		onRename={(pill) => pill.localBranch && branchEdit.startRename(pill.localBranch, pill.sha)}
 		onCreateBranch={(sha) => branchEdit.startCreate(sha)}
 	/>
+{/if}
+
+{#if stashMenu && repoId}
+	<StashMenu
+		selector={stashMenu.selector}
+		subject={stashMenu.subject}
+		{repoId}
+		x={stashMenu.x}
+		y={stashMenu.y}
+		onDismiss={() => (stashMenu = null)}
+	/>
+{/if}
+
+{#if tagMenu}
+	<ContextMenu items={tagMenuItems} x={tagMenu.x} y={tagMenu.y} onDismiss={() => (tagMenu = null)} ariaLabel="Tag actions" />
 {/if}
 
 <style>

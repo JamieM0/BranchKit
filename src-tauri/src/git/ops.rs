@@ -192,6 +192,50 @@ pub async fn checkout_detached(
     Ok(())
 }
 
+/// Stash-and-checkout: the ARCHITECTURE.md §9 "would be overwritten by checkout" error's
+/// suggested compound action. Stashes uncommitted changes (including untracked), checks out
+/// `name`, then pops the stash back — so switching branches never forces the user to lose or
+/// manually shelve work first. If the pop conflicts, the stash is left in place (not dropped) and
+/// the conflict surfaces normally (§7.4) rather than being silently swallowed here.
+#[tauri::command]
+pub async fn checkout_stash_and_switch(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+    name: String,
+) -> Result<(), AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    handle.begin_self_op(&[
+        WatchedKind::Head,
+        WatchedKind::Refs,
+        WatchedKind::WorkingTree,
+        WatchedKind::Index,
+    ]);
+    git(
+        &handle.path,
+        &["stash", "push", "-u", "-m", "Before switching branches"],
+        GitOpts::default(),
+    )
+    .await?;
+    let checkout_result = git(&handle.path, &["checkout", &name], GitOpts::default()).await;
+    if let Err(e) = checkout_result {
+        // Checkout itself failed even with a clean tree — restore the stash so nothing is lost,
+        // then surface the original error.
+        let _ = git(&handle.path, &["stash", "pop"], GitOpts::default()).await;
+        emit_changes(&app, &repo_id, &[ChangeKind::Head]);
+        return Err(e.into());
+    }
+    let pop_result = git(&handle.path, &["stash", "pop"], GitOpts::default()).await;
+    emit_changes(
+        &app,
+        &repo_id,
+        &[ChangeKind::Head, ChangeKind::WorkingTree, ChangeKind::Index],
+    );
+    pop_result?;
+    Ok(())
+}
+
 /// Create a branch at `sha` (default HEAD). When `checkout` is true, `git checkout -b` so the new
 /// branch is entered immediately (the inline name-editor-at-HEAD flow, DESIGN_SPEC.md §15.  It's
 /// "create branch here", GITKRAKEN_WORKFLOWS §2.3).
@@ -286,18 +330,27 @@ pub async fn recreate_branch(
 
 /// Merge `source` into the current branch — `git merge --no-edit <source>` (drag pill → "Merge X
 /// into Y" with Y checked out, DESIGN_SPEC.md §4.4). A conflict returns the raw git error and
-/// leaves the repo mid-merge; full conflict UX arrives in prompts 12–13.
+/// leaves the repo mid-merge; full conflict UX arrives in prompts 12–13. `allow_unrelated` passes
+/// `--allow-unrelated-histories` — the retry the ARCHITECTURE.md §9 "refusing to merge unrelated
+/// histories" suggestion offers; the frontend always calls this with `false` first and only
+/// retries with `true` after the user picks that suggestion.
 #[tauri::command]
 pub async fn merge_ref(
     app: AppHandle,
     state: State<'_, AppState>,
     repo_id: String,
     source: String,
+    allow_unrelated: bool,
 ) -> Result<(), AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
     handle.begin_self_op(&[WatchedKind::Head, WatchedKind::Refs, WatchedKind::WorkingTree, WatchedKind::Index]);
-    let result = git(&handle.path, &["merge", "--no-edit", &source], GitOpts::default()).await;
+    let mut args = vec!["merge", "--no-edit"];
+    if allow_unrelated {
+        args.push("--allow-unrelated-histories");
+    }
+    args.push(&source);
+    let result = git(&handle.path, &args, GitOpts::default()).await;
     // Whether it merged cleanly or hit a conflict, HEAD/worktree changed — refresh either way.
     emit_changes(&app, &repo_id, &[ChangeKind::Head]);
     result?;
@@ -346,52 +399,6 @@ pub async fn fast_forward(
         git(&handle.path, &["fetch", ".", &refspec], GitOpts::default()).await?;
         emit_changes(&app, &repo_id, &[ChangeKind::Refs]);
     }
-    Ok(())
-}
-
-/// Pull the current branch — the ahead/behind fix-it popover's Pull actions (DESIGN_SPEC.md
-/// §4.4/§15.7). `mode` is `ff` (`--ff-only`), `rebase` (`--rebase`) or `merge` (`--no-rebase`).
-/// A conflict leaves the repo mid-operation for the graph to surface.
-#[tauri::command]
-pub async fn pull(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    repo_id: String,
-    mode: String,
-) -> Result<(), AppError> {
-    let mode_flag = match mode.as_str() {
-        "rebase" => "--rebase",
-        "merge" => "--no-rebase",
-        _ => "--ff-only",
-    };
-    let handle = require_repo(&state, &repo_id)?;
-    let _guard = handle.op_queue.lock().await;
-    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::Refs, WatchedKind::Remote, WatchedKind::WorkingTree, WatchedKind::Index]);
-    let result = git(&handle.path, &["pull", mode_flag], GitOpts::network()).await;
-    emit_changes(&app, &repo_id, &[ChangeKind::Head]);
-    result?;
-    Ok(())
-}
-
-/// Push the current branch to its upstream — the badge popover's Push / Force push actions. Force
-/// is **always `--force-with-lease`**, never `--force` (ARCHITECTURE.md §7.1).
-#[tauri::command]
-pub async fn push(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    repo_id: String,
-    force: bool,
-) -> Result<(), AppError> {
-    let handle = require_repo(&state, &repo_id)?;
-    let _guard = handle.op_queue.lock().await;
-    handle.begin_self_op(&[WatchedKind::Refs, WatchedKind::Remote]);
-    let mut args = vec!["push"];
-    if force {
-        args.push("--force-with-lease");
-    }
-    let result = git(&handle.path, &args, GitOpts::network()).await;
-    emit_changes(&app, &repo_id, &[ChangeKind::Refs, ChangeKind::Remote]);
-    result?;
     Ok(())
 }
 
@@ -450,6 +457,152 @@ pub async fn branch_divergence(
 ) -> Result<Divergence, AppError> {
     let handle = require_repo(&state, &repo_id)?;
     Ok(divergence(&handle.path, &branch).await?)
+}
+
+/// Cherry-pick a commit onto HEAD — the commit row menu's "Cherry-pick commit"
+/// (GITKRAKEN_WORKFLOWS.md §2.6/§3.1). A conflict leaves the repo mid-cherry-pick for the graph to
+/// surface, same as merge/rebase.
+#[tauri::command]
+pub async fn cherry_pick(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+    sha: String,
+) -> Result<(), AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::WorkingTree, WatchedKind::Index]);
+    let result = git(&handle.path, &["cherry-pick", &sha], GitOpts::default()).await;
+    emit_changes(&app, &repo_id, &[ChangeKind::Head]);
+    result?;
+    Ok(())
+}
+
+/// Revert a commit, committing the inverse immediately — the commit row menu's "Revert commit"
+/// (GITKRAKEN_WORKFLOWS.md §2.6/§3.1). A conflict leaves the repo mid-revert for the graph to
+/// surface.
+#[tauri::command]
+pub async fn revert_commit(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+    sha: String,
+) -> Result<(), AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::WorkingTree, WatchedKind::Index]);
+    let result = git(&handle.path, &["revert", "--no-edit", &sha], GitOpts::default()).await;
+    emit_changes(&app, &repo_id, &[ChangeKind::Head]);
+    result?;
+    Ok(())
+}
+
+/// Reset the current branch to `sha` — the commit row menu's "Reset `<current>` to this commit"
+/// submenu (Soft/Mixed/Hard, GITKRAKEN_WORKFLOWS.md §2.6/§3.1, guarded per DESIGN_SPEC.md §4.6 in
+/// the frontend for Hard). `mode` is `"soft"`, `"mixed"`, or anything else falls back to `"hard"`.
+#[tauri::command]
+pub async fn reset_to(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+    sha: String,
+    mode: String,
+) -> Result<(), AppError> {
+    let flag = match mode.as_str() {
+        "soft" => "--soft",
+        "mixed" => "--mixed",
+        _ => "--hard",
+    };
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::WorkingTree, WatchedKind::Index]);
+    git(&handle.path, &["reset", flag, &sha], GitOpts::default()).await?;
+    emit_changes(&app, &repo_id, &[ChangeKind::Head]);
+    Ok(())
+}
+
+/// Create a tag at `sha` — lightweight, or annotated when `message` is non-empty (the commit row
+/// menu's "Create tag here" / "Create annotated tag here", GITKRAKEN_WORKFLOWS.md §2.9/§3.1).
+#[tauri::command]
+pub async fn create_tag(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+    name: String,
+    sha: String,
+    message: Option<String>,
+) -> Result<(), AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    handle.begin_self_op(&[WatchedKind::Refs]);
+    let message = message.filter(|m| !m.trim().is_empty());
+    let result = match message.as_deref() {
+        Some(m) => git(&handle.path, &["tag", "-a", "-m", m, &name, &sha], GitOpts::default()).await,
+        None => git(&handle.path, &["tag", &name, &sha], GitOpts::default()).await,
+    };
+    emit_changes(&app, &repo_id, &[ChangeKind::Refs]);
+    result?;
+    Ok(())
+}
+
+/// Delete a tag — the left panel's TAGS section / graph tag pill's Delete.
+#[tauri::command]
+pub async fn delete_tag(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+    name: String,
+) -> Result<(), AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    handle.begin_self_op(&[WatchedKind::Refs]);
+    git(&handle.path, &["tag", "-d", &name], GitOpts::default()).await?;
+    emit_changes(&app, &repo_id, &[ChangeKind::Refs]);
+    Ok(())
+}
+
+/// The configured URL for `remote` — used to build "Copy link to this commit on remote" (the
+/// frontend turns this into a GitHub/GitLab web URL; unsupported hosts just fall back to copying
+/// the sha, GITKRAKEN_WORKFLOWS.md §2.9/§3.1).
+#[tauri::command]
+pub async fn get_remote_url(
+    state: State<'_, AppState>,
+    repo_id: String,
+    remote: String,
+) -> Result<String, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let output = git(&handle.path, &["remote", "get-url", &remote], GitOpts::default()).await?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Appends `pattern` as a new line to the repo root's `.gitignore` (creating it if needed) — the
+/// file row menu's Ignore submenu (this file / by extension / folder, GITKRAKEN_WORKFLOWS.md
+/// §2.9/§3.4). A no-op (no watcher suppression needed beyond WorkingTree) when the pattern is
+/// already present verbatim on its own line.
+#[tauri::command]
+pub async fn ignore_path(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+    pattern: String,
+) -> Result<(), AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    let gitignore = handle.path.join(".gitignore");
+    let existing = std::fs::read_to_string(&gitignore).unwrap_or_default();
+    if existing.lines().any(|l| l == pattern) {
+        return Ok(());
+    }
+    handle.begin_self_op(&[WatchedKind::WorkingTree]);
+    let mut contents = existing;
+    if !contents.is_empty() && !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+    contents.push_str(&pattern);
+    contents.push('\n');
+    std::fs::write(&gitignore, contents)?;
+    emit_changes(&app, &repo_id, &[ChangeKind::WorkingTree]);
+    Ok(())
 }
 
 #[cfg(test)]

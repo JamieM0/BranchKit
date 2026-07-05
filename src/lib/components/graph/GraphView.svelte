@@ -6,6 +6,8 @@
 	import AheadBehindPopover from "./AheadBehindPopover.svelte";
 	import BranchMenu from "./BranchMenu.svelte";
 	import DropMenu from "./DropMenu.svelte";
+	import CommitMenu from "./CommitMenu.svelte";
+	import StashMenu from "./StashMenu.svelte";
 	import {
 		anchoredScrollTop,
 		AVATAR_RADIUS,
@@ -74,6 +76,8 @@
 		x: number;
 		y: number;
 	} | null>(null);
+	let commitMenu = $state<{ sha: string; x: number; y: number } | null>(null);
+	let stashMenu = $state<{ selector: string; subject: string; x: number; y: number } | null>(null);
 
 	const repoId = $derived(graph.repoId);
 	const currentBranch = $derived(graph.head && !graph.head.detached ? graph.head.branch : null);
@@ -426,7 +430,12 @@
 
 	function handleActivate(sha: string, e: MouseEvent) {
 		const row = allRows[shaIndex.get(sha) ?? -1];
-		if (row?.kind === "stash" || row?.kind === "wip") return; // stash pop / WIP have no detach.
+		if (row?.kind === "wip") return;
+		if (row?.kind === "stash") {
+			// Double-click a stash row → Pop with Undo toast (DESIGN_SPEC.md §4.5/§15.18).
+			if (repoId) void actions.popStash(repoId, row.selector, row.subject);
+			return;
+		}
 		// Double-click a commit → detached checkout, guarded (§4.6). "Don't ask again" skips the popover.
 		if (graphView.detachDontAsk) {
 			if (repoId) void actions.checkoutDetached(repoId, sha);
@@ -486,6 +495,15 @@
 		const source = dnd.source;
 		if (!source || source.sha === sha) return;
 		dropMenu = { source, targetPill: null, targetSha: sha, x: dnd.x, y: dnd.y };
+	}
+
+	function handleRowMenu(row: GraphViewRow, x: number, y: number) {
+		if (row.kind === "commit") commitMenu = { sha: row.sha, x, y };
+		else if (row.kind === "stash") stashMenu = { selector: row.selector, subject: row.subject, x, y };
+	}
+
+	function compareAgainstWorking(sha: string) {
+		graphSelection.compareAgainstWorking(sha);
 	}
 
 	function startCreateBranch(sha: string) {
@@ -573,6 +591,8 @@
 			badgePopover = null;
 			branchMenu = null;
 			dropMenu = null;
+			commitMenu = null;
+			stashMenu = null;
 			branchEdit.cancel();
 			dnd.end();
 			if (scrollEl) scrollEl.scrollTop = 0;
@@ -659,6 +679,7 @@
 									onPillMenu={handlePillMenu}
 									onPillDrop={handlePillDrop}
 									onRowDrop={handleRowDrop}
+									onRowMenu={handleRowMenu}
 								/>
 							{/if}
 						{/each}
@@ -715,6 +736,30 @@
 		x={dropMenu.x}
 		y={dropMenu.y}
 		onDismiss={() => (dropMenu = null)}
+	/>
+{/if}
+
+{#if commitMenu && repoId}
+	<CommitMenu
+		sha={commitMenu.sha}
+		{repoId}
+		{currentBranch}
+		x={commitMenu.x}
+		y={commitMenu.y}
+		onDismiss={() => (commitMenu = null)}
+		onCreateBranch={startCreateBranch}
+		onCompareWorking={compareAgainstWorking}
+	/>
+{/if}
+
+{#if stashMenu && repoId}
+	<StashMenu
+		selector={stashMenu.selector}
+		subject={stashMenu.subject}
+		{repoId}
+		x={stashMenu.x}
+		y={stashMenu.y}
+		onDismiss={() => (stashMenu = null)}
 	/>
 {/if}
 

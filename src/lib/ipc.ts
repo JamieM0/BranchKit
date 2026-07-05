@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
   ChangedFile,
   ChangeKind,
@@ -113,8 +113,12 @@ export async function recreateBranch(repoId: string, name: string, sha: string):
   return invoke("recreate_branch", { repoId, name, sha });
 }
 
-export async function mergeRef(repoId: string, source: string): Promise<void> {
-  return invoke("merge_ref", { repoId, source });
+export async function mergeRef(
+  repoId: string,
+  source: string,
+  allowUnrelated = false,
+): Promise<void> {
+  return invoke("merge_ref", { repoId, source, allowUnrelated });
 }
 
 export async function rebaseOnto(repoId: string, onto: string): Promise<void> {
@@ -130,12 +134,28 @@ export async function fastForward(
   return invoke("fast_forward", { repoId, branch, source, isCurrent });
 }
 
+export async function fetchAll(repoId: string): Promise<void> {
+  return invoke("fetch_all", { repoId });
+}
+
 export async function pull(repoId: string, mode: "ff" | "rebase" | "merge"): Promise<void> {
   return invoke("pull", { repoId, mode });
 }
 
 export async function push(repoId: string, force: boolean): Promise<void> {
   return invoke("push", { repoId, force });
+}
+
+/** Push a branch with no upstream yet, setting `origin/<name>` as its tracking ref in one action —
+ * the toolbar's Push-becomes-Publish state (DESIGN_SPEC.md §3.2). */
+export async function publish(repoId: string, name: string): Promise<void> {
+  return invoke("publish", { repoId, name });
+}
+
+/** Stash, checkout `name`, then pop — the "would be overwritten by checkout" error's suggested
+ * compound action (ARCHITECTURE.md §9). */
+export async function checkoutStashAndSwitch(repoId: string, name: string): Promise<void> {
+  return invoke("checkout_stash_and_switch", { repoId, name });
 }
 
 export async function setUpstream(
@@ -148,6 +168,71 @@ export async function setUpstream(
 
 export async function branchDivergence(repoId: string, branch: string): Promise<Divergence> {
   return invoke("branch_divergence", { repoId, branch });
+}
+
+// --- rewriting history / tags (GITKRAKEN_WORKFLOWS.md §2.6/§2.9, §3.1) ---
+
+export async function cherryPick(repoId: string, sha: string): Promise<void> {
+  return invoke("cherry_pick", { repoId, sha });
+}
+
+export async function revertCommit(repoId: string, sha: string): Promise<void> {
+  return invoke("revert_commit", { repoId, sha });
+}
+
+export async function resetTo(
+  repoId: string,
+  sha: string,
+  mode: "soft" | "mixed" | "hard",
+): Promise<void> {
+  return invoke("reset_to", { repoId, sha, mode });
+}
+
+export async function createTag(
+  repoId: string,
+  name: string,
+  sha: string,
+  message: string | null,
+): Promise<void> {
+  return invoke("create_tag", { repoId, name, sha, message });
+}
+
+export async function deleteTag(repoId: string, name: string): Promise<void> {
+  return invoke("delete_tag", { repoId, name });
+}
+
+export async function getRemoteUrl(repoId: string, remote: string): Promise<string> {
+  return invoke("get_remote_url", { repoId, remote });
+}
+
+export async function ignorePath(repoId: string, pattern: string): Promise<void> {
+  return invoke("ignore_path", { repoId, pattern });
+}
+
+// --- stash (DESIGN_SPEC.md §3.2/§4.5/§15.18) ---
+
+export async function stashPush(
+  repoId: string,
+  message: string | null,
+  includeUntracked: boolean,
+): Promise<void> {
+  return invoke("stash_push", { repoId, message, includeUntracked });
+}
+
+export async function stashPop(repoId: string, selector: string): Promise<void> {
+  return invoke("stash_pop", { repoId, selector });
+}
+
+export async function stashApply(repoId: string, selector: string): Promise<void> {
+  return invoke("stash_apply", { repoId, selector });
+}
+
+export async function stashDrop(repoId: string, selector: string): Promise<void> {
+  return invoke("stash_drop", { repoId, selector });
+}
+
+export async function getStashPatch(repoId: string, selector: string): Promise<string> {
+  return invoke("get_stash_patch", { repoId, selector });
 }
 
 // --- status & staging (ARCHITECTURE.md §6.1, §7.1) ---
@@ -280,6 +365,35 @@ export async function getDiffFiles(repoId: string, a: string, b: string): Promis
   return invoke("get_diff_files", { repoId, a, b });
 }
 
+/** A commit vs the current worktree — "Compare commit against working directory" (§2.6/§3.1). */
+export async function getDiffCommitVsWorking(
+  repoId: string,
+  sha: string,
+  path: string,
+  ignoreWhitespace: boolean,
+): Promise<FileDiff> {
+  return invoke("get_diff_commit_vs_working", { repoId, sha, path, ignoreWhitespace });
+}
+
+export async function getCommitFilesVsWorking(repoId: string, sha: string): Promise<ChangedFile[]> {
+  return invoke("get_commit_files_vs_working", { repoId, sha });
+}
+
+/** A whole commit as a mailbox-format patch — "Create patch from commit" (§2.9/§3.1). */
+export async function createPatchFromCommit(repoId: string, sha: string): Promise<string> {
+  return invoke("create_patch_from_commit", { repoId, sha });
+}
+
+/** One file's current changes as a unified diff — the file row menu's "Create patch from file
+ * changes" (§3.4). */
+export async function createPatchFromFile(
+  repoId: string,
+  path: string,
+  staged: boolean,
+): Promise<string> {
+  return invoke("create_patch_from_file", { repoId, path, staged });
+}
+
 /** `revision: null` reads the worktree file off disk; `":"` reads the staged/index blob; any
  * other string is a commit sha — the diff viewer's image-diff before/after (§6.2). */
 export async function getBlob(
@@ -306,6 +420,14 @@ export async function onRepoChanged(
 export async function pickFolder(title: string): Promise<string | null> {
   const result = await openDialog({ title, directory: true, multiple: false });
   return typeof result === "string" ? result : null;
+}
+
+/** Native "Save patch as…" dialog + write — "Create patch from commit/file" (§2.9/§3.1/§3.4). */
+export async function savePatchAs(defaultName: string, contents: string): Promise<boolean> {
+  const path = await saveDialog({ defaultPath: defaultName, filters: [{ name: "Patch", extensions: ["patch"] }] });
+  if (!path) return false;
+  await invoke("save_text_file", { path, contents });
+  return true;
 }
 
 export async function onCloneProgress(

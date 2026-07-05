@@ -10,6 +10,8 @@ pub mod identity;
 pub mod log;
 pub mod ops;
 pub mod refs;
+pub mod remote;
 pub mod stage;
+pub mod stash;
 pub mod status;
 pub mod worktree;

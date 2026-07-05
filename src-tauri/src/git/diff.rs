@@ -291,6 +291,92 @@ pub async fn get_diff_files(
     Ok(diff_files_two_commits(&handle.path, &a, &b).await?)
 }
 
+// --- compare-against-working-directory, create-patch (GITKRAKEN_WORKFLOWS.md §2.6/§2.9/§3.1) ---
+
+/// A commit's changes vs the *current worktree* (not its parent) — the commit row menu's "Compare
+/// commit against working directory". `git diff <sha> -- <path>` diffs the worktree file against
+/// that commit's blob directly, skipping the index entirely.
+pub async fn diff_commit_vs_working(
+    repo: &Path,
+    sha: &str,
+    path: &str,
+    ignore_whitespace: bool,
+) -> Result<FileDiff, GitError> {
+    run_diff(repo, &["diff", "--no-color", "-U3", sha, "--", path], ignore_whitespace).await
+}
+
+/// Changed files between a commit and the current worktree — the file list backing
+/// [`diff_commit_vs_working`].
+pub async fn commit_files_vs_working(repo: &Path, sha: &str) -> Result<Vec<ChangedFile>, GitError> {
+    let output = git(
+        repo,
+        &["diff", "--no-color", "--name-status", "-M", "-z", sha],
+        GitOpts::default(),
+    )
+    .await?;
+    Ok(parse_name_status(&output.stdout))
+}
+
+#[tauri::command]
+pub async fn get_diff_commit_vs_working(
+    state: State<'_, AppState>,
+    repo_id: String,
+    sha: String,
+    path: String,
+    ignore_whitespace: bool,
+) -> Result<FileDiff, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    Ok(diff_commit_vs_working(&handle.path, &sha, &path, ignore_whitespace).await?)
+}
+
+#[tauri::command]
+pub async fn get_commit_files_vs_working(
+    state: State<'_, AppState>,
+    repo_id: String,
+    sha: String,
+) -> Result<Vec<ChangedFile>, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    Ok(commit_files_vs_working(&handle.path, &sha).await?)
+}
+
+/// A whole commit as a mailbox-format patch — the commit row menu's "Create patch from commit"
+/// (saved to a file by the frontend via the native save dialog).
+#[tauri::command]
+pub async fn create_patch_from_commit(
+    state: State<'_, AppState>,
+    repo_id: String,
+    sha: String,
+) -> Result<String, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let output = git(
+        &handle.path,
+        &["format-patch", "-1", "--stdout", &sha],
+        GitOpts::default(),
+    )
+    .await?;
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// One file's current changes as a unified diff — the file row menu's "Create patch from file
+/// changes". `staged` selects `--cached` (the index vs HEAD) instead of the worktree vs index.
+#[tauri::command]
+pub async fn create_patch_from_file(
+    state: State<'_, AppState>,
+    repo_id: String,
+    path: String,
+    staged: bool,
+) -> Result<String, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let mut args = vec!["diff", "--no-color", "-U3"];
+    if staged {
+        args.push("--cached");
+    }
+    args.push("--");
+    args.push(&path);
+    let output = git(&handle.path, &args, GitOpts::default()).await?;
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 fn extract_diff_path(raw: &str) -> Option<String> {
     let raw = raw.trim();
     // `git show` sometimes trails a tab + extra info on --- / +++ lines; drop it.

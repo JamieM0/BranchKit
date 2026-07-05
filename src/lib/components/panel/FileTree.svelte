@@ -11,6 +11,8 @@
 		nodes,
 		selectedPath = null,
 		actionFor,
+		repoId = null,
+		repoRoot = null,
 		onFileClick,
 		onFileAction,
 		onFileDiscard,
@@ -18,6 +20,8 @@
 		nodes: TreeNode[];
 		selectedPath?: string | null;
 		actionFor: (path: string) => "Stage" | "Unstage";
+		repoId?: string | null;
+		repoRoot?: string | null;
 		onFileClick: (path: string) => void;
 		onFileAction: (path: string) => void;
 		onFileDiscard?: (path: string) => void;
@@ -72,6 +76,8 @@
 					partial={node.row.partial}
 					selected={selectedPath === node.row.path}
 					actionLabel={actionFor(node.row.path)}
+					{repoId}
+					{repoRoot}
 					onClick={() => onFileClick(node.row.path)}
 					onAction={() => onFileAction(node.row.path)}
 					onDiscard={onFileDiscard ? () => onFileDiscard(node.row.path) : undefined}

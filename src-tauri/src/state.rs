@@ -5,8 +5,8 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
@@ -42,6 +42,11 @@ pub struct RepoHandle {
     pub generation: AtomicU64,
     suppress: Mutex<Option<Suppression>>,
     pub watcher: Mutex<Option<RepoWatcher>>,
+    /// When the last fetch (auto or manual) completed — ARCHITECTURE.md §7.2's "skipped if a
+    /// fetch ran <30s ago (manual counts)" rule reads this before every auto-fetch tick.
+    pub last_fetch: Mutex<Option<Instant>>,
+    /// The running auto-fetch interval task, if any, so it can be cancelled on `close_repo`.
+    pub auto_fetch_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl RepoHandle {
@@ -53,6 +58,21 @@ impl RepoHandle {
             generation: AtomicU64::new(0),
             suppress: Mutex::new(None),
             watcher: Mutex::new(None),
+            last_fetch: Mutex::new(None),
+            auto_fetch_task: Mutex::new(None),
+        }
+    }
+
+    /// Records that a fetch (auto or manual) just completed now.
+    pub fn record_fetch(&self) {
+        *self.last_fetch.lock().expect("last_fetch mutex poisoned") = Some(Instant::now());
+    }
+
+    /// Whether a fetch completed within the last `window` — the auto-fetch "ran <30s ago" guard.
+    pub fn fetched_within(&self, window: Duration) -> bool {
+        match *self.last_fetch.lock().expect("last_fetch mutex poisoned") {
+            Some(at) => at.elapsed() < window,
+            None => false,
         }
     }
 
@@ -80,13 +100,33 @@ impl RepoHandle {
     }
 }
 
-#[derive(Default)]
 pub struct AppState {
     pub repos: DashMap<RepoId, std::sync::Arc<RepoHandle>>,
     next_id: AtomicU64,
+    /// Whether the app window currently has focus — ARCHITECTURE.md §7.2's "only while window
+    /// focused" auto-fetch gate. Updated from tauri `WindowEvent::Focused` in `lib.rs`; starts
+    /// `true` so a repo opened before the first focus event still auto-fetches. `Arc`-wrapped so
+    /// each repo's auto-fetch task can hold its own cheap, independent handle to it.
+    pub focused: Arc<AtomicBool>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            repos: DashMap::new(),
+            next_id: AtomicU64::new(0),
+            focused: Arc::new(AtomicBool::new(true)),
+        }
+    }
 }
 
 impl AppState {
+    /// A cloned handle to the focus flag for a repo's auto-fetch task to poll independently of
+    /// any single tauri command's `State` borrow.
+    pub fn focused_handle(&self) -> Arc<AtomicBool> {
+        self.focused.clone()
+    }
+
     pub fn next_repo_id(&self) -> RepoId {
         let n = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
         RepoId(format!("repo-{n}"))

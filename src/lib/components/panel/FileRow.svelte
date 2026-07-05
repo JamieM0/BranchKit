@@ -1,11 +1,16 @@
 <script lang="ts">
+	import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 	import type { FileStatusCode } from "$lib/types";
 	import { statusGlyph } from "$lib/status/glyphs";
 	import { fileName, parentPath } from "$lib/status/sections";
+	import * as actions from "$lib/actions";
+	import ContextMenu, { type MenuItem } from "$lib/components/shell/ContextMenu.svelte";
 
 	/** Shared file row — DESIGN_SPEC.md §6.1. Reused by the working-directory sections, the
 	 * commit-detail changed-file list and compare mode's file list, so status glyphs, rename
-	 * display and hover actions stay identical everywhere a file can be listed. */
+	 * display and hover actions stay identical everywhere a file can be listed. The right-click
+	 * menu (GITKRAKEN_WORKFLOWS.md §3.4) only offers what this row's context actually supports —
+	 * Stage/Unstage/Discard/Ignore/patch need `repoId`; Open/Show need `repoRoot`. */
 	let {
 		path,
 		origPath = null,
@@ -13,6 +18,8 @@
 		partial = false,
 		selected = false,
 		actionLabel = null,
+		repoId = null,
+		repoRoot = null,
 		onClick,
 		onAction,
 		onDiscard,
@@ -23,6 +30,8 @@
 		partial?: boolean;
 		selected?: boolean;
 		actionLabel?: "Stage" | "Unstage" | null;
+		repoId?: string | null;
+		repoRoot?: string | null;
 		onClick?: () => void;
 		onAction?: () => void;
 		/** Discard this file's unstaged changes — only offered from the Unstaged section
@@ -33,6 +42,7 @@
 	const glyph = $derived(statusGlyph(status));
 	const name = $derived(fileName(path));
 	const parent = $derived(parentPath(path));
+	const extension = $derived(name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : null);
 
 	async function copyPath() {
 		try {
@@ -41,10 +51,80 @@
 			/* clipboard unavailable — best effort */
 		}
 	}
+
+	let menu = $state<{ x: number; y: number } | null>(null);
+
+	function openMenu(e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		menu = { x: e.clientX, y: e.clientY };
+	}
+
+	const menuItems: MenuItem[] = $derived.by(() => {
+		const items: MenuItem[] = [];
+		if (actionLabel && onAction) {
+			items.push({ type: "action", label: actionLabel, run: () => onAction?.() });
+		}
+		if (onDiscard) {
+			items.push({ type: "action", label: "Discard changes", danger: true, run: () => onDiscard?.() });
+		}
+		if (repoId) {
+			items.push({
+				type: "submenu",
+				label: "Ignore",
+				items: [
+					{ type: "action", label: "This file", run: () => void actions.ignorePath(repoId!, path) },
+					...(extension
+						? ([
+								{
+									type: "action",
+									label: `All *.${extension} files`,
+									run: () => void actions.ignorePath(repoId!, `*.${extension}`),
+								},
+							] satisfies MenuItem[])
+						: []),
+					...(parent
+						? ([{ type: "action", label: `Folder ${parent}/`, run: () => void actions.ignorePath(repoId!, `${parent}/`) }] satisfies MenuItem[])
+						: []),
+				],
+			});
+		}
+		items.push({ type: "separator" });
+		items.push({
+			type: "action",
+			label: "File History",
+			disabledReason: "Lands with file history (prompt 14)",
+			run: () => {},
+		});
+		items.push({
+			type: "action",
+			label: "File Blame",
+			disabledReason: "Lands with blame (prompt 14)",
+			run: () => {},
+		});
+		items.push({ type: "separator" });
+		if (repoRoot) {
+			items.push({ type: "action", label: "Open file", run: () => void openPath(`${repoRoot}/${path}`) });
+			items.push({
+				type: "action",
+				label: "Show in Finder/Explorer",
+				run: () => void revealItemInDir(`${repoRoot}/${path}`),
+			});
+		}
+		items.push({ type: "action", label: "Copy file path", run: copyPath });
+		if (repoId) {
+			items.push({
+				type: "action",
+				label: "Create patch from file changes",
+				run: () => void actions.createPatchFromFile(repoId!, path, actionLabel === "Unstage"),
+			});
+		}
+		return items;
+	});
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-<div class="row" class:selected onclick={() => onClick?.()}>
+<div class="row" class:selected onclick={() => onClick?.()} oncontextmenu={openMenu}>
 	<span
 		class="glyph"
 		class:hollow={glyph.hollow}
@@ -92,17 +172,21 @@
 		<button
 			type="button"
 			class="overflow"
-			title="Copy path"
-			aria-label="Copy path"
+			title="More actions"
+			aria-label="More actions"
 			onclick={(e) => {
 				e.stopPropagation();
-				void copyPath();
+				openMenu(e);
 			}}
 		>
 			⋯
 		</button>
 	</span>
 </div>
+
+{#if menu}
+	<ContextMenu items={menuItems} x={menu.x} y={menu.y} onDismiss={() => (menu = null)} ariaLabel="{name} actions" />
+{/if}
 
 <style>
 	.row {

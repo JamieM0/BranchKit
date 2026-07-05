@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { status } from "$lib/stores/status.svelte";
 	import { graph } from "$lib/stores/graph.svelte";
+	import { repos } from "$lib/stores/repo.svelte";
 	import { settings } from "$lib/stores/settings.svelte";
 	import { diffView } from "$lib/stores/diffView.svelte";
 	import { toasts } from "$lib/stores/toasts.svelte";
@@ -17,6 +18,7 @@
 	 * the parent RightPanel). */
 
 	const repoId = $derived(graph.repoId);
+	const repoRoot = $derived(repos.tabs.find((t) => t.id === repoId)?.path ?? null);
 	const branch = $derived(graph.head?.detached ? graph.head.sha.slice(0, 7) : (graph.head?.branch ?? "…"));
 
 	const unstagedSorted = $derived(
@@ -331,6 +333,8 @@
 					nodes={buildFileTree(unstagedSorted)}
 					selectedPath={selectedSection === "unstaged" ? selectedPath : null}
 					actionFor={() => "Stage"}
+					{repoId}
+					{repoRoot}
 					onFileClick={(p) => {
 						const row = unstagedSorted.find((r) => r.path === p);
 						if (row) openDiff(row, "unstaged");
@@ -347,6 +351,8 @@
 						partial={row.partial}
 						selected={selectedSection === "unstaged" && selectedPath === row.path}
 						actionLabel="Stage"
+						{repoId}
+						{repoRoot}
 						onClick={() => openDiff(row, "unstaged")}
 						onAction={() => void stage(row.path)}
 						onDiscard={() => void discardFile(row.path)}
@@ -369,6 +375,8 @@
 					nodes={buildFileTree(stagedSorted)}
 					selectedPath={selectedSection === "staged" ? selectedPath : null}
 					actionFor={() => "Unstage"}
+					{repoId}
+					{repoRoot}
 					onFileClick={(p) => {
 						const row = stagedSorted.find((r) => r.path === p);
 						if (row) openDiff(row, "staged");
@@ -384,6 +392,8 @@
 						partial={row.partial}
 						selected={selectedSection === "staged" && selectedPath === row.path}
 						actionLabel="Unstage"
+						{repoId}
+						{repoRoot}
 						onClick={() => openDiff(row, "staged")}
 						onAction={() => void unstage(row.path)}
 					/>

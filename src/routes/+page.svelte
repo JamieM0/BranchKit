@@ -4,11 +4,14 @@
   import FirstLaunch from "$lib/components/shell/FirstLaunch.svelte";
   import RepoPicker from "$lib/components/shell/RepoPicker.svelte";
   import RepoTabs from "$lib/components/shell/RepoTabs.svelte";
+  import Toolbar from "$lib/components/shell/Toolbar.svelte";
   import GraphView from "$lib/components/graph/GraphView.svelte";
   import LeftPanel from "$lib/components/panel/LeftPanel.svelte";
   import RightPanel from "$lib/components/panel/RightPanel.svelte";
   import DiffViewer from "$lib/components/diff/DiffViewer.svelte";
   import ToastStack from "$lib/components/shell/ToastStack.svelte";
+  import CommandPalette from "$lib/components/shell/CommandPalette.svelte";
+  import { commandPalette } from "$lib/stores/commandPalette.svelte";
   import { isModEvent } from "$lib/platform";
   import { onboarding } from "$lib/stores/onboarding.svelte";
   import { repos } from "$lib/stores/repo.svelte";
@@ -18,9 +21,22 @@
   import { branchEdit } from "$lib/stores/branchEdit.svelte";
   import { graphNav } from "$lib/stores/graphNav.svelte";
   import { commitDraft } from "$lib/stores/commitDraft.svelte";
+  import { network, retryOnFocus } from "$lib/stores/network.svelte";
+  import { notifyBehindIncrease, resetBehindTracking } from "$lib/stores/behindNotifier";
+  import * as actions from "$lib/actions";
 
   let showPicker = $state(false);
   let showClone = $state(false);
+
+  // ARCHITECTURE.md §9/§14: once offline, retry a fetch as soon as the window regains focus
+  // rather than waiting for the next auto-fetch tick.
+  $effect(() => {
+    return retryOnFocus(() => {
+      if (repos.activeId && !repos.activeId.startsWith("pending:")) {
+        void actions.fetchAll(repos.activeId);
+      }
+    });
+  });
 
   // Keep the graph store pointed at the active repo. Real repo ids only — a `pending:` clone tab has
   // no backend repo yet. Git mutations from the graph (checkout, create branch, …) land in later
@@ -38,12 +54,23 @@
         commitDraft.reset();
       }
     } else if (openedGraphId) {
+      resetBehindTracking(openedGraphId);
       openedGraphId = null;
       void graph.close();
       void status.close();
       diffView.close();
       commitDraft.reset();
     }
+  });
+
+  // DESIGN_SPEC.md §8/§15.19: "`branch` is N behind — Pull" toast whenever a fetch (manual or
+  // auto) finds new commits on the current branch's upstream.
+  $effect(() => {
+    const id = repos.activeId;
+    const branch = graph.head && !graph.head.detached ? graph.head.branch : null;
+    if (!id || id.startsWith("pending:") || !branch) return;
+    const ref = graph.refs.find((r) => r.kind === "branch" && r.isHead);
+    notifyBehindIncrease(id, branch, ref?.behind ?? 0);
   });
 
   function openPicker() {
@@ -76,7 +103,13 @@
   function handleKeydown(e: KeyboardEvent) {
     if (!isModEvent(e)) return;
     const key = e.key.toLowerCase();
-    if (key === "t") {
+    const id = repos.activeId && !repos.activeId.startsWith("pending:") ? repos.activeId : null;
+    const branch = graph.head && !graph.head.detached ? graph.head.branch : null;
+    if (key === "k") {
+      // Cmd+K → command palette (§10 global map).
+      e.preventDefault();
+      commandPalette.toggle();
+    } else if (key === "t") {
       e.preventDefault();
       showPicker = true;
     } else if (key === "w") {
@@ -89,6 +122,18 @@
         e.preventDefault();
         graphNav.scrollTo(headSha);
         branchEdit.startCreate(headSha);
+      }
+    } else if (key === "p") {
+      if (id && branch) {
+        e.preventDefault();
+        if (e.shiftKey) void actions.push(id, false, branch);
+        else void actions.pull(id, "ff", branch);
+      }
+    } else if (key === "s") {
+      if (id) {
+        e.preventDefault();
+        if (e.shiftKey) void actions.popStash(id, "stash@{0}", "");
+        else void actions.stashPush(id, {});
       }
     } else if (/^[1-9]$/.test(key)) {
       e.preventDefault();
@@ -106,6 +151,15 @@
 {:else}
   <div class="shell">
     <RepoTabs onPick={openPicker} />
+    {#if network.offline}
+      <div class="offline-banner" role="status">
+        BranchKit can't reach the network — changes here still work, sync will resume once
+        you're back online.
+      </div>
+    {/if}
+    {#if repos.active}
+      <Toolbar repoId={repos.active.id} />
+    {/if}
     <div class="content">
       {#if repos.active}
         <LeftPanel />
@@ -127,6 +181,7 @@
 {/if}
 
 <ToastStack />
+<CommandPalette />
 
 {#if showPicker}
   <RepoPicker onOpenPath={handleOpenPath} onRequestClone={requestClone} onDismiss={dismissPicker} />
@@ -155,5 +210,13 @@
     flex: 1;
     min-width: 0;
     overflow: hidden;
+  }
+
+  .offline-banner {
+    padding: var(--space-1) var(--space-3);
+    font-size: 12px;
+    color: var(--warn);
+    background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+    border-bottom: 1px solid var(--border);
   }
 </style>

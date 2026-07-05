@@ -160,6 +160,15 @@ pub async fn open_repo(
     let handle = Arc::new(RepoHandle::new(id.clone(), canonical.clone()));
     let repo_watcher = watcher::start(app.clone(), handle.clone()).await?;
     *handle.watcher.lock().expect("watcher mutex poisoned") = Some(repo_watcher);
+    // ARCHITECTURE.md §7.2: one auto-fetch interval per open repo, gated on window focus — the
+    // `AppState` it reads is `Arc`-shared so `focused` updates from `lib.rs`'s window-event
+    // handler are visible without threading a fresh reference through on every tick.
+    let focused = state.focused_handle();
+    let auto_fetch = crate::git::remote::spawn_auto_fetch(app.clone(), handle.clone(), focused);
+    *handle
+        .auto_fetch_task
+        .lock()
+        .expect("auto_fetch_task mutex poisoned") = Some(auto_fetch);
     state.repos.insert(id, handle.clone());
 
     let info = repo_info(&handle).await?;
@@ -233,6 +242,14 @@ pub async fn close_repo(state: State<'_, AppState>, id: String) -> Result<(), Ap
     };
     let _guard = handle.op_queue.lock().await;
     *handle.watcher.lock().expect("watcher mutex poisoned") = None;
+    if let Some(task) = handle
+        .auto_fetch_task
+        .lock()
+        .expect("auto_fetch_task mutex poisoned")
+        .take()
+    {
+        task.abort();
+    }
     Ok(())
 }
 

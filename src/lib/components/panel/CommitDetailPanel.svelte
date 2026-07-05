@@ -3,6 +3,7 @@
 	import { graphSelection } from "$lib/stores/graphSelection.svelte";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
 	import { diffView } from "$lib/stores/diffView.svelte";
+	import { repos } from "$lib/stores/repo.svelte";
 	import * as ipc from "$lib/ipc";
 	import type { ChangedFile, CommitMeta } from "$lib/types";
 	import FileRow from "./FileRow.svelte";
@@ -13,6 +14,7 @@
 	let { sha }: { sha: string } = $props();
 
 	const repoId = $derived(graph.repoId);
+	const repoRoot = $derived(repos.tabs.find((t) => t.id === repoId)?.path ?? null);
 
 	let meta = $state<CommitMeta | null>(null);
 	let files = $state<ChangedFile[]>([]);
@@ -124,6 +126,7 @@
 					path={file.path}
 					origPath={file.origPath}
 					status={file.status}
+					{repoRoot}
 					onClick={() => openFile(file)}
 				/>
 			{/each}

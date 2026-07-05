@@ -107,6 +107,22 @@ export interface RefsResponse {
 	head: HeadInfo;
 }
 
+// --- error.rs ---------------------------------------------------------
+
+/** A suggested next action attached to a translated error — DESIGN_SPEC.md §11. `actionId` is an
+ * opaque string the frontend's error-handling catalog switches on (see `actions.ts`). */
+export interface Suggestion {
+	label: string;
+	actionId: string;
+}
+
+/** The shape every failed `invoke()` rejects with — ARCHITECTURE.md §9. */
+export interface AppError {
+	userMessage: string;
+	suggestion: Suggestion | null;
+	raw: string;
+}
+
 // --- git/ops.rs ---------------------------------------------------------
 
 export interface CommitLine {
@@ -219,6 +235,17 @@ export interface ChangedFile {
 	/** Set for renames/copies. */
 	origPath: string | null;
 	status: ChangedFileStatus;
+}
+
+// --- git/log.rs (stash) ---------------------------------------------------------
+
+export interface StashEntry {
+	sha: string;
+	/** The commit the stash was taken on top of (its first parent). */
+	baseSha: string;
+	/** Reflog selector, e.g. `stash@{0}`. */
+	selector: string;
+	subject: string;
 }
 
 // --- git/discard.rs ---------------------------------------------------------

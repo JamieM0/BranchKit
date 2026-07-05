@@ -1,16 +1,21 @@
 <script lang="ts">
 	import { graph } from "$lib/stores/graph.svelte";
-	import { graphSelection } from "$lib/stores/graphSelection.svelte";
+	import { graphSelection, WORKING_SENTINEL } from "$lib/stores/graphSelection.svelte";
 	import { diffView } from "$lib/stores/diffView.svelte";
+	import { repos } from "$lib/stores/repo.svelte";
 	import * as ipc from "$lib/ipc";
 	import type { ChangedFile } from "$lib/types";
 	import FileRow from "./FileRow.svelte";
 
 	/** Compare mode — DESIGN_SPEC.md §4.3/§15.5. Cmd+click two commits in the graph to pair them;
-	 * this shows "Comparing A ↔ B" with a swap button and the file list of `git diff A B`. */
+	 * this shows "Comparing A ↔ B" with a swap button and the file list of `git diff A B`. `b` may
+	 * also be the working-directory sentinel (the commit row menu's "Compare against working
+	 * directory", §2.6/§3.1), which swaps in the vs-working-tree IPC calls instead. */
 	let { a, b }: { a: string; b: string } = $props();
 
 	const repoId = $derived(graph.repoId);
+	const repoRoot = $derived(repos.tabs.find((t) => t.id === repoId)?.path ?? null);
+	const vsWorking = $derived(b === WORKING_SENTINEL);
 
 	let files = $state<ChangedFile[]>([]);
 	let loading = $state(false);
@@ -21,8 +26,8 @@
 		if (!id) return;
 		loading = true;
 		files = [];
-		void ipc
-			.getDiffFiles(id, x, y)
+		const request = y === WORKING_SENTINEL ? ipc.getCommitFilesVsWorking(id, x) : ipc.getDiffFiles(id, x, y);
+		void request
 			.then((result) => {
 				if (a === x && b === y) files = result;
 			})
@@ -35,7 +40,7 @@
 		diffView.open({
 			path: file.path,
 			origPath: file.origPath,
-			source: { kind: "compare", a, b },
+			source: vsWorking ? { kind: "commitVsWorking", sha: a } : { kind: "compare", a, b },
 		});
 	}
 </script>
@@ -43,11 +48,13 @@
 <div class="panel">
 	<div class="header">
 		<span class="title">
-			Comparing <code>{a.slice(0, 7)}</code> ↔ <code>{b.slice(0, 7)}</code>
+			Comparing <code>{a.slice(0, 7)}</code> ↔ {#if vsWorking}Working directory{:else}<code>{b.slice(0, 7)}</code>{/if}
 		</span>
-		<button type="button" class="swap" title="Swap comparison direction" onclick={() => graphSelection.swapCompare()}>
-			⇄
-		</button>
+		{#if !vsWorking}
+			<button type="button" class="swap" title="Swap comparison direction" onclick={() => graphSelection.swapCompare()}>
+				⇄
+			</button>
+		{/if}
 	</div>
 
 	<div class="files">
@@ -61,6 +68,7 @@
 					path={file.path}
 					origPath={file.origPath}
 					status={file.status}
+					{repoRoot}
 					onClick={() => openFile(file)}
 				/>
 			{/each}

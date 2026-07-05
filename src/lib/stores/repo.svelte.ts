@@ -162,6 +162,15 @@ class RepoStore {
 		}
 	}
 
+	/** Toggles the tab's spinner overlay for a long-running op in that repo — DESIGN_SPEC.md §3.1
+	 * ("A tab shows a subtle spinner overlay on its favicon-dot while a long operation runs"). Used
+	 * around fetch/pull/push/publish, which otherwise have no other tab-level "in flight" signal. */
+	setBusy(id: string, busy: boolean) {
+		const i = this.#tabIndex(id);
+		if (i === -1) return;
+		this.tabs[i].busy = busy;
+	}
+
 	switchTo(id: string) {
 		if (this.#tabIndex(id) !== -1) this.activeId = id;
 	}
