@@ -69,10 +69,21 @@ pub enum GraphTopologyRow {
 
 /// Full sha+parents topology for the whole repo (`rev-list --all --topo-order --parents`) —
 /// fast even at 100k commits per ARCHITECTURE.md §5.1. Do this once; fetch metadata on demand.
+///
+/// `--exclude=refs/stash` matters: `refs/` (and therefore `--all`) includes the stash ref, which
+/// would pull the stash commit *and* its internal index/untracked commits into the walk. Those are
+/// surfaced separately as Stash pseudo-rows (§5.1/DESIGN_SPEC §4.5), so leaving them in here would
+/// render the stash commit twice — once as a commit, once as a stash — a duplicate graph row.
 pub async fn topology(repo: &Path) -> Result<Vec<CommitTopology>, GitError> {
     let output = git(
         repo,
-        &["rev-list", "--all", "--topo-order", "--parents"],
+        &[
+            "rev-list",
+            "--exclude=refs/stash",
+            "--all",
+            "--topo-order",
+            "--parents",
+        ],
         GitOpts::default(),
     )
     .await?;

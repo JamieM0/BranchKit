@@ -122,6 +122,44 @@ async fn stash_list_reports_base_sha_and_selector() {
 }
 
 #[tokio::test]
+async fn graph_rows_do_not_duplicate_the_stash_commit() {
+    // Regression: `rev-list --all` includes refs/stash, so without excluding it the stash commit
+    // shows up both as a topology Commit row and as a Stash pseudo-row — a duplicate graph key.
+    let repo = TestRepo::init().await;
+    repo.write("a.txt", "one\n");
+    repo.commit_all("base").await;
+
+    repo.write("a.txt", "two\n");
+    repo.run(&["stash", "push", "-m", "wip changes"]).await;
+
+    let stash_out = repo.run(&["rev-parse", "refs/stash"]).await;
+    let stash_sha = String::from_utf8_lossy(&stash_out.stdout).trim().to_string();
+    let stash_sha = stash_sha.as_str();
+
+    let rows = log::graph_rows(repo.path()).await.expect("graph rows");
+
+    // No sha appears twice across all rows.
+    let mut seen = std::collections::HashSet::new();
+    for row in &rows {
+        let sha = match row {
+            log::GraphTopologyRow::Commit { sha, .. } => sha,
+            log::GraphTopologyRow::Stash { sha, .. } => sha,
+        };
+        assert!(seen.insert(sha.clone()), "duplicate graph row sha: {sha}");
+    }
+
+    // The stash sha is present exactly once, and as a Stash row (never a Commit row).
+    let as_commit = rows
+        .iter()
+        .any(|r| matches!(r, log::GraphTopologyRow::Commit { sha, .. } if sha == stash_sha));
+    let as_stash = rows
+        .iter()
+        .any(|r| matches!(r, log::GraphTopologyRow::Stash { sha, .. } if sha == stash_sha));
+    assert!(!as_commit, "stash commit must not appear as a plain commit row");
+    assert!(as_stash, "stash must appear as a stash pseudo-row");
+}
+
+#[tokio::test]
 async fn stash_list_empty_when_no_stashes() {
     let repo = TestRepo::init().await;
     repo.write("a.txt", "one\n");
