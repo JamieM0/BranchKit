@@ -393,5 +393,10 @@ Windows: `CREATE_NO_WINDOW`; paths with `\` — always use `std::path`, display 
 slashes in UI; `core.autocrlf` noise → show a quiet "line endings" note in diffs rather than
 full-file changes when only EOL differs (detect: diff with `--ignore-cr-at-eol` empty).
 macOS: app nap — auto-fetch already pauses on blur; codesign/notarize deferred (document in
-release prompt). Linux: keyring needs libsecret/gnome-keyring — degrade with in-memory-only
-secrets + a warning banner if unavailable. All: never assume `~`, use tauri path APIs.
+release prompt). Because of that deferral, `tauri dev`'s unsigned debug binary has no stable
+identity across rebuilds, so Keychain re-prompts for the GitHub/AI secrets (credentials.rs) on
+every launch even after "Always Allow" — `scripts/dev-cert-setup.sh` + `npm run
+tauri:dev:signed` work around this for local dev by signing with a stable self-signed identity;
+this is unrelated to the real release signing/notarization, which is still deferred. Linux:
+keyring needs libsecret/gnome-keyring — degrade with in-memory-only secrets + a warning banner
+if unavailable. All: never assume `~`, use tauri path APIs.

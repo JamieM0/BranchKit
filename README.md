@@ -18,6 +18,13 @@ npm run tauri dev    # run in development
 npm run tauri build  # produce a release bundle
 ```
 
+On macOS, `tauri dev` runs an unsigned debug binary, which gets a new identity on every
+rebuild — so if you've connected GitHub or a remote AI provider (both store a secret in the
+Keychain), macOS will re-prompt for Keychain access on every launch even after "Always Allow."
+Run `bash scripts/dev-cert-setup.sh` once to create a stable local signing identity, then use
+`npm run tauri:dev:signed` instead of `npm run tauri dev` — it signs the debug binary with that
+identity before launching, so the Keychain grant sticks across rebuilds.
+
 ## License
 
 [AGPL-3.0](LICENSE)
