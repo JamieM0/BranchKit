@@ -55,14 +55,17 @@ class AppSettingsStore {
 
 	async #persist() {
 		try {
-			await ipc.updateSettings(this.current);
+			// `$state.snapshot` — `this.current` is a Svelte reactive proxy, which the IPC bridge
+			// (and `structuredClone` below) can't serialize directly.
+			await ipc.updateSettings($state.snapshot(this.current));
 		} catch {
 			// Best-effort — a failed write shouldn't block the UI from reflecting the change locally.
 		}
 	}
 
 	update(patch: (draft: AppSettings) => void) {
-		const next = structuredClone(this.current);
+		// `structuredClone` throws `DataCloneError` on a Svelte reactive proxy — snapshot first.
+		const next = structuredClone($state.snapshot(this.current));
 		patch(next);
 		this.current = next;
 		void this.#persist();
