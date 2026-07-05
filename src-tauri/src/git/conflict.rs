@@ -350,7 +350,7 @@ pub enum Side {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum FileRegion {
     /// Unchanged on both sides — plain document flow, no candidates.
     Context { lines: Vec<String> },

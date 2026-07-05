@@ -59,6 +59,11 @@ fn classify(refname: &str) -> Option<(RefKind, String)> {
         return Some((RefKind::Branch, short.to_string()));
     }
     if let Some(short) = refname.strip_prefix("refs/remotes/") {
+        // Skip the symbolic `refs/remotes/<remote>/HEAD` pointer — it isn't a real branch and
+        // would otherwise render as a confusing extra "HEAD" pill in the graph.
+        if short == "HEAD" || short.ends_with("/HEAD") {
+            return None;
+        }
         return Some((RefKind::RemoteBranch, short.to_string()));
     }
     refname

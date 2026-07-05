@@ -216,7 +216,7 @@
 					{/each}
 				{/if}
 			</div>
-			<div class="commit-diff">
+			<div class="commit-diff selectable">
 				{#if loadingDiff}
 					<p class="empty">Loading diff…</p>
 				{:else if !commitDiff}

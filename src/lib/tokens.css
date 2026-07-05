@@ -96,3 +96,21 @@ body {
   font-family: var(--font-ui);
   font-size: var(--font-size-ui);
 }
+
+/* App chrome behaves like a native app: labels, buttons and panel text are not selectable.
+ * Selection is re-enabled only where selecting text is the point — editing fields, and code
+ * content (diffs, blame, the Keep Panel document, commit messages) via `.selectable`. */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+input,
+textarea,
+[contenteditable="true"],
+.selectable,
+.selectable * {
+  -webkit-user-select: text;
+  user-select: text;
+}

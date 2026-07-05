@@ -66,14 +66,15 @@ pub fn current_platform_asset_url() -> Option<String> {
     current_platform_asset().map(|a| download_url(a.asset_name))
 }
 
-/// The pinned model — ggml-org's own GGUF mirror of Gemma 3 1B instruction-tuned, Q4_K_M
-/// quantization (~800 MB, DESIGN_SPEC.md §13's model card). sha256 recorded at pin time from the
-/// repo's own LFS metadata.
-pub const MODEL_FILE_NAME: &str = "gemma-3-1b-it-Q4_K_M.gguf";
+/// The pinned model — Google's official QAT q4_0 GGUF of Gemma 4 E2B instruction-tuned
+/// (~3.3 GB, DESIGN_SPEC.md §13's model card; replaces the original Gemma 3 1B pin per Jamie).
+/// sha256 recorded at pin time from the repo's own LFS metadata
+/// (`google/gemma-4-E2B-it-qat-q4_0-gguf`, file `gemma-4-E2B_q4_0-it.gguf`).
+pub const MODEL_FILE_NAME: &str = "gemma-4-E2B_q4_0-it.gguf";
 pub const MODEL_URL: &str =
-    "https://huggingface.co/ggml-org/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf";
-pub const MODEL_SHA256: &str = "8ccc5cd1f1b3602548715ae25a66ed73fd5dc68a210412eea643eb20eb75a135";
-pub const MODEL_SIZE_BYTES: u64 = 806_058_240;
+    "https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/main/gemma-4-E2B_q4_0-it.gguf";
+pub const MODEL_SHA256: &str = "3646b4c147cd235a44d91df1546d3b7d8e29b547dbe4e1f80856419aa455e6fd";
+pub const MODEL_SIZE_BYTES: u64 = 3_349_514_112;
 
 #[cfg(test)]
 mod tests {

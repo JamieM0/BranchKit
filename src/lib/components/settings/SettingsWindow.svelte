@@ -439,7 +439,7 @@
 						<RevealSection open={appSettings.current.ai.provider === "local"}>
 							<div class="model-card">
 								<div class="model-card-head">
-									<span>Gemma 3 1B (Q4, ~800 MB)</span>
+									<span>Gemma 4 E2B (Q4, ~3.3 GB)</span>
 									{#if ai.localModelState === "ready"}
 										<span class="badge-ready">✓ Ready</span>
 									{:else if ai.downloading}

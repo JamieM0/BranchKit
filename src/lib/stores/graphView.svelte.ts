@@ -53,6 +53,9 @@ class GraphViewStore {
 	sha = $state(false);
 	widths: Record<SizableColumn, number> = $state({ ...DEFAULT_WIDTHS });
 	detachDontAsk = $state(false);
+	/** Auto-computed GRAPH column width — sized to the widest visible lane layout by the view
+	 * (not persisted, not user-resizable): the column collapses/expands with the graph itself. */
+	graphAuto = $state(DEFAULT_WIDTHS.graph);
 
 	constructor() {
 		const stored = load();
@@ -96,6 +99,11 @@ class GraphViewStore {
 
 	resetWidth(column: SizableColumn) {
 		this.setWidth(column, DEFAULT_WIDTHS[column]);
+	}
+
+	setGraphAuto(px: number) {
+		const clamped = Math.max(MIN_WIDTH.graph, Math.min(MAX_WIDTH, Math.round(px)));
+		if (clamped !== this.graphAuto) this.graphAuto = clamped;
 	}
 
 	setDetachDontAsk(value: boolean) {

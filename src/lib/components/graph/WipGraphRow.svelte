@@ -39,6 +39,14 @@
 		commitDraft.editingWip = true;
 	}
 
+	/** Clicking anywhere on the WIP row — not just the `// WIP` text — selects working-directory
+	 * mode AND opens + focuses the inline summary editor. There's nothing else a click on this row
+	 * could sensibly mean, so make the whole row the affordance. */
+	function handleRowClick() {
+		onSelect();
+		commitDraft.editingWip = true;
+	}
+
 	function onInputKeydown(e: KeyboardEvent) {
 		if (e.key === "Enter" && isModEvent(e)) {
 			e.preventDefault();
@@ -62,10 +70,10 @@
 	role="row"
 	tabindex="-1"
 	style="height: {ROW_HEIGHT}px;"
-	onclick={onSelect}
+	onclick={handleRowClick}
 >
 	<div class="cell branch" style="width: {graphView.widths.branch}px;"></div>
-	<div class="cell graph" style="width: {graphView.widths.graph}px;" aria-hidden="true"></div>
+	<div class="cell graph" style="width: {graphView.graphAuto}px;" aria-hidden="true"></div>
 
 	<div class="cell message grow">
 		{#if commitDraft.editingWip}
@@ -75,6 +83,7 @@
 				placeholder="Commit summary"
 				aria-label="Commit summary"
 				bind:value={commitDraft.summary}
+				disabled={commitDraft.aiGenerating}
 				onclick={(e) => e.stopPropagation()}
 				onblur={() => (commitDraft.editingWip = false)}
 				onkeydown={onInputKeydown}

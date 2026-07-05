@@ -245,7 +245,7 @@
 <div class="panel" tabindex="0" role="listbox" aria-label="Working directory changes" onkeydown={onKeydown}>
 	<div class="header">
 		<div class="title">
-			<strong>{totalChanged}</strong> changes on <code>{branch}</code>
+			<strong>{totalChanged}</strong> {totalChanged === 1 ? "change" : "changes"} on <code>{branch}</code>
 		</div>
 		<div class="header-actions">
 			<button

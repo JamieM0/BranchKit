@@ -71,18 +71,15 @@
 		await actions.createTag(repoId, name, sha, message);
 	}
 
+	// Daily-driver actions stay top-level; history-rewriting and power tools live in one
+	// "Advanced" flyout so the menu reads at a glance (Jamie's request — the old flat menu had
+	// 13 entries and 5 separators).
 	const items: MenuItem[] = $derived([
-		{ type: "action", label: "Checkout this commit", run: () => run(() => onCreateBranch(sha)) },
+		{ type: "action", label: "Checkout this commit", run: () => run(() => actions.checkoutDetached(repoId, sha)) },
 		{ type: "action", label: "Create branch here…", run: () => run(() => onCreateBranch(sha)) },
 		{ type: "separator" },
-		{ type: "action", label: "Cherry-pick commit", run: () => run(() => actions.cherryPick(repoId, sha)) },
 		...(currentBranch
 			? ([
-					{
-						type: "action",
-						label: `Rebase ${currentBranch} onto this commit`,
-						run: () => run(() => actions.rebaseOnto(repoId, currentBranch, sha)),
-					},
 					{
 						type: "submenu",
 						label: `Reset ${currentBranch} to this commit`,
@@ -94,19 +91,7 @@
 					},
 				] satisfies MenuItem[])
 			: []),
-		{ type: "action", label: "Revert commit", run: () => run(() => actions.revertCommit(repoId, sha)) },
-		{ type: "separator" },
 		{ type: "action", label: "Copy commit SHA", shortcut: "", run: () => run(() => actions.copyToClipboard(sha, "Copied SHA")) },
-		{
-			type: "action",
-			label: "Copy link to this commit on remote: origin",
-			run: () => run(() => actions.copyCommitLink(repoId, "origin", sha)),
-		},
-		{ type: "action", label: "Create patch from commit", run: () => run(() => actions.createPatchFromCommit(repoId, sha)) },
-		{ type: "separator" },
-		{ type: "action", label: "Compare commit against working directory", run: () => run(() => onCompareWorking(sha)) },
-		{ type: "separator" },
-		{ type: "action", label: "Create worktree from this commit…", run: () => run(() => worktreeDialog.open(sha)) },
 		{ type: "separator" },
 		{
 			type: "action",
@@ -121,6 +106,33 @@
 			run: () => {
 				mode = "annotatedTag";
 			},
+		},
+		{ type: "separator" },
+		{
+			type: "submenu",
+			label: "Advanced",
+			items: [
+				{ type: "action", label: "Cherry-pick commit", run: () => run(() => actions.cherryPick(repoId, sha)) },
+				...(currentBranch
+					? ([
+							{
+								type: "action",
+								label: `Rebase ${currentBranch} onto this commit`,
+								run: () => run(() => actions.rebaseOnto(repoId, currentBranch, sha)),
+							},
+						] satisfies MenuItem[])
+					: []),
+				{ type: "action", label: "Revert commit", run: () => run(() => actions.revertCommit(repoId, sha)) },
+				{ type: "separator" },
+				{
+					type: "action",
+					label: "Copy link to this commit on remote: origin",
+					run: () => run(() => actions.copyCommitLink(repoId, "origin", sha)),
+				},
+				{ type: "action", label: "Create patch from commit", run: () => run(() => actions.createPatchFromCommit(repoId, sha)) },
+				{ type: "action", label: "Compare commit against working directory", run: () => run(() => onCompareWorking(sha)) },
+				{ type: "action", label: "Create worktree from this commit…", run: () => run(() => worktreeDialog.open(sha)) },
+			],
 		},
 	]);
 </script>

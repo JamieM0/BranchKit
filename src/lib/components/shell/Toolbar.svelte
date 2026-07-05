@@ -1,5 +1,16 @@
 <script lang="ts">
+	// phosphor-svelte: icon set requested by Jamie (replaces emoji/text glyphs on action buttons).
+	import {
+		ArrowLineDown,
+		ArrowLineUp,
+		CaretDown,
+		Gear,
+		GitBranch,
+		TrayArrowDown,
+		TrayArrowUp,
+	} from "phosphor-svelte";
 	import * as actions from "$lib/actions";
+	import * as ipc from "$lib/ipc";
 	import { graph } from "$lib/stores/graph.svelte";
 	import { branchEdit } from "$lib/stores/branchEdit.svelte";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
@@ -33,6 +44,19 @@
 				? "Pull (merge)"
 				: "Pull (fast-forward if possible)",
 	);
+
+	// No configured remote → Publish can't work; disable it with an explanation instead of letting
+	// the push die on git's raw "'origin' does not appear to be a git repository" (Jamie's report).
+	let remotes = $state<string[]>([]);
+	$effect(() => {
+		const id = repoId;
+		void graph.refs; // refresh the remote list whenever refs change (remote add/remove).
+		ipc.listRemotes(id).then(
+			(r) => (remotes = r),
+			() => (remotes = []),
+		);
+	});
+	const hasRemote = $derived(remotes.length > 0);
 
 	let pullMenuOpen = $state(false);
 	let pushMenuOpen = $state(false);
@@ -133,6 +157,7 @@
 	{#if branch}
 		<div class="split">
 			<button type="button" class="primary" onclick={() => doPull(defaultPullMode)} title={defaultPullLabel}>
+				<ArrowLineDown size={13} />
 				Pull
 				{#if behind > 0}<span class="badge behind">↓{behind}</span>{/if}
 			</button>
@@ -145,7 +170,7 @@
 					pullMenuOpen = !pullMenuOpen;
 				}}
 			>
-				▾
+				<CaretDown size={10} />
 			</button>
 			{#if pullMenuOpen}
 				<div class="menu" role="menu">
@@ -159,12 +184,23 @@
 		</div>
 
 		<div class="split">
-			<button type="button" class="primary" onclick={doPushOrPublish}>
+			<button
+				type="button"
+				class="primary"
+				disabled={!hasUpstream && !hasRemote}
+				title={!hasUpstream && !hasRemote
+					? "No remote configured — add one first (e.g. git remote add origin <url>)"
+					: hasUpstream
+						? "Push to upstream"
+						: "Publish this branch to the remote"}
+				onclick={doPushOrPublish}
+			>
+				<ArrowLineUp size={13} />
 				{hasUpstream ? "Push" : "Publish"}
 				{#if hasUpstream && ahead > 0}<span class="badge ahead">↑{ahead}</span>{/if}
 			</button>
 			{#if hasUpstream}
-				<button type="button" class="caret" aria-label="Push options" onclick={openPushMenu}>▾</button>
+				<button type="button" class="caret" aria-label="Push options" onclick={openPushMenu}><CaretDown size={10} /></button>
 				{#if pushMenuOpen}
 					<div class="menu" role="menu">
 						<p class="consequence">
@@ -180,11 +216,11 @@
 			{/if}
 		</div>
 
-		<button type="button" class="plain" onclick={createBranch} title="Create branch at HEAD">Branch</button>
+		<button type="button" class="plain" onclick={createBranch} title="Create branch at HEAD"><GitBranch size={13} /> Branch</button>
 	{/if}
 
 	<div class="split">
-		<button type="button" class="plain" onclick={stashAll} title="Stash all uncommitted changes">Stash</button>
+		<button type="button" class="plain" onclick={stashAll} title="Stash all uncommitted changes"><TrayArrowDown size={13} /> Stash</button>
 		<button
 			type="button"
 			class="caret"
@@ -195,7 +231,7 @@
 				stashMenuOpen = !stashMenuOpen;
 			}}
 		>
-			▾
+			<CaretDown size={10} />
 		</button>
 		{#if stashMenuOpen}
 			<div class="menu" role="menu">
@@ -221,7 +257,7 @@
 	</div>
 
 	<button type="button" class="plain" disabled={!hasStashes} title={hasStashes ? "Pop the latest stash" : "No stashes"} onclick={popLatest}>
-		Pop
+		<TrayArrowUp size={13} /> Pop
 	</button>
 
 	<button type="button" class="palette-trigger" onclick={() => commandPalette.open()} title="Command palette">
@@ -235,7 +271,7 @@
 		title={isMac() ? "Settings (⌘,)" : "Settings (Ctrl+,)"}
 		aria-label="Settings"
 	>
-		⚙
+		<Gear size={14} />
 	</button>
 </div>
 
@@ -264,7 +300,7 @@
 	.split button.primary {
 		display: flex;
 		align-items: center;
-		gap: var(--space-1);
+		gap: 5px;
 		padding: var(--space-1) var(--space-2);
 		border: 1px solid var(--border);
 		border-right: none;
@@ -275,11 +311,17 @@
 		font-size: 12px;
 		font-weight: 600;
 		cursor: pointer;
-		transition: background var(--motion-hover);
+		transition: background var(--motion-hover), border-color var(--motion-hover);
 	}
 
-	.split button.primary:hover {
+	.split button.primary:hover:not(:disabled) {
 		background: var(--overlay);
+		border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+	}
+
+	.split button.primary:disabled {
+		color: var(--text-faint);
+		cursor: default;
 	}
 
 	.split button.caret {
@@ -377,6 +419,9 @@
 	}
 
 	button.plain {
+		display: flex;
+		align-items: center;
+		gap: 5px;
 		padding: var(--space-1) var(--space-2);
 		border: 1px solid var(--border);
 		border-radius: var(--radius-control);
@@ -386,11 +431,12 @@
 		font-size: 12px;
 		font-weight: 600;
 		cursor: pointer;
-		transition: background var(--motion-hover);
+		transition: background var(--motion-hover), border-color var(--motion-hover);
 	}
 
 	button.plain:hover:not(:disabled) {
 		background: var(--overlay);
+		border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 	}
 
 	button.plain:disabled {

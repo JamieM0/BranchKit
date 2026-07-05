@@ -1,4 +1,6 @@
 <script lang="ts">
+	// phosphor-svelte: icon set requested by Jamie (replaces emoji glyphs).
+	import { ArrowsClockwise, CircleNotch, Sparkle, X } from "phosphor-svelte";
 	import { graph } from "$lib/stores/graph.svelte";
 	import { status } from "$lib/stores/status.svelte";
 	import { commitDraft } from "$lib/stores/commitDraft.svelte";
@@ -144,6 +146,7 @@
 		const staged = hasStaged;
 		usedUnstagedFallback = !staged;
 		generating = true;
+		commitDraft.aiGenerating = true;
 		showAiChips = false;
 		commitDraft.summary = "";
 		commitDraft.description = "";
@@ -168,6 +171,7 @@
 		} finally {
 			unlisten();
 			generating = false;
+			commitDraft.aiGenerating = false;
 		}
 	}
 
@@ -208,6 +212,7 @@
 			placeholder="Commit summary"
 			aria-label="Commit summary"
 			bind:value={commitDraft.summary}
+			disabled={generating}
 			onkeydown={onSummaryKeydown}
 		/>
 		<span
@@ -229,7 +234,7 @@
 			title={aiTooltip()}
 			onclick={onAiButtonClick}
 		>
-			{generating ? "…" : "✨"}
+			{#if generating}<span class="spin"><CircleNotch size={13} /></span>{:else}<Sparkle size={13} weight={aiEnabled ? "fill" : "regular"} />{/if}
 		</button>
 	</div>
 
@@ -239,8 +244,8 @@
 
 	{#if showAiChips}
 		<div class="ai-chips">
-			<button type="button" class="chip" onclick={() => void generateAiMessage()}>↻ Regenerate</button>
-			<button type="button" class="chip" onclick={dismissAiChips}>✕ Dismiss</button>
+			<button type="button" class="chip" onclick={() => void generateAiMessage()}><ArrowsClockwise size={11} /> Regenerate</button>
+			<button type="button" class="chip" onclick={dismissAiChips}><X size={11} /> Dismiss</button>
 		</div>
 	{/if}
 
@@ -252,6 +257,7 @@
 			aria-label="Commit description"
 			rows="2"
 			bind:value={commitDraft.description}
+			disabled={generating}
 			onkeydown={onDescriptionKeydown}
 		></textarea>
 		<div class="ruler" aria-hidden="true"></div>
@@ -426,8 +432,20 @@
 		}
 	}
 
+	.spin {
+		display: inline-flex;
+		animation: ai-spin 900ms linear infinite;
+	}
+
+	@keyframes ai-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
 	@media (prefers-reduced-motion: reduce) {
-		.ai.generating {
+		.ai.generating,
+		.spin {
 			animation: none;
 		}
 	}

@@ -575,6 +575,24 @@ pub async fn get_remote_url(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Configured remote names (`git remote`) — lets the toolbar disable Publish (with an explanatory
+/// tooltip) on a repo that has no remote at all, instead of letting the push fail with git's raw
+/// "'origin' does not appear to be a git repository" error.
+#[tauri::command]
+pub async fn list_remotes(
+    state: State<'_, AppState>,
+    repo_id: String,
+) -> Result<Vec<String>, AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let output = git(&handle.path, &["remote"], GitOpts::default()).await?;
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 /// Appends `pattern` as a new line to the repo root's `.gitignore` (creating it if needed) — the
 /// file row menu's Ignore submenu (this file / by extension / folder, GITKRAKEN_WORKFLOWS.md
 /// §2.9/§3.4). A no-op (no watcher suppression needed beyond WorkingTree) when the pattern is

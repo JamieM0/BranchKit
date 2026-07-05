@@ -70,7 +70,7 @@ conflicted `#fb7185` (‼) · untracked `#6ea8ff` (＋ hollow)
 - Spacing scale 4/8/12/16/24. Radius: 6px controls, 10px cards/menus, pills fully rounded.
 - Motion: 120ms ease-out for hovers, 180ms for panel/row transitions, 240ms max for anything.
   Respect `prefers-reduced-motion` (disable all non-essential animation).
-- Icons: **Lucide** only, 14–16px, always with tooltips (400ms delay).
+- Icons: **Phosphor** (phosphor-svelte) only, 10–16px, always with tooltips (400ms delay). (Changed from Lucide at Jamie's request during the v0.1 polish pass.)
 
 ---
 

@@ -2,6 +2,7 @@
 	import { graphSelection } from "$lib/stores/graphSelection.svelte";
 	import { prPanel } from "$lib/stores/prPanel.svelte";
 	import { graph } from "$lib/stores/graph.svelte";
+	import { status } from "$lib/stores/status.svelte";
 	import WorkingDirectoryPanel from "./WorkingDirectoryPanel.svelte";
 	import CommitDetailPanel from "./CommitDetailPanel.svelte";
 	import ComparePanel from "./ComparePanel.svelte";
@@ -25,8 +26,23 @@
 			if (key !== null) prPanel.close();
 		}
 	});
+
+	// The panel only exists when it has something to say: a selection/compare/PR, or a dirty
+	// working tree to stage & commit. A clean tree with nothing selected → no panel at all,
+	// giving the graph the full width instead of showing "0 changes / no changes" boilerplate.
+	const hasWip = $derived(status.report.entries.length > 0);
+	const visible = $derived(
+		compare !== null ||
+			selectedSha !== null ||
+			prPanel.creating ||
+			prPanel.selectedNumber !== null ||
+			hasWip,
+	);
 </script>
 
+{#if !visible}
+	<!-- nothing selected, nothing to commit — the graph gets the space -->
+{:else}
 <aside class="panel">
 	{#if compare}
 		<ComparePanel a={compare.a} b={compare.b} />
@@ -40,6 +56,7 @@
 		<WorkingDirectoryPanel />
 	{/if}
 </aside>
+{/if}
 
 <style>
 	.panel {

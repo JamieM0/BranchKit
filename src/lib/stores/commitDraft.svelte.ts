@@ -20,6 +20,10 @@ class CommitDraftStore {
 	amend = $state(false);
 	/** The WIP-row `// WIP` text is being edited inline right now (§4.2). */
 	editingWip = $state(false);
+	/** AI generation is streaming into the draft — every bound editor (composer summary +
+	 * description, WIP inline input) locks itself while this is true so the user's keystrokes and
+	 * the stream can't fight over the fields. */
+	aiGenerating = $state(false);
 	/** Bumped to ask the composer to focus its description textarea (Enter from a summary field). */
 	focusDescriptionToken = $state(0);
 

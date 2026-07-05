@@ -11,6 +11,7 @@
 	import {
 		anchoredScrollTop,
 		AVATAR_RADIUS,
+		graphWidthForLanes,
 		laneCenterX,
 		MERGE_NODE_RADIUS,
 		ROW_HEIGHT,
@@ -97,6 +98,32 @@
 	const rows = $derived(graph.rows);
 	const headSha = $derived(graph.head?.sha ?? null);
 	const detached = $derived(graph.head?.detached ?? false);
+
+	// Local-vs-remote commit distinction (§15/QA): commits unreachable from every remote-tracking
+	// ref are "unpushed" — they only exist on this machine. Computed by a plain BFS over the
+	// topology we already hold client-side; O(commits), no extra git calls.
+	const remoteTipShas = $derived(
+		graph.refs.filter((r) => r.kind === "remoteBranch").map((r) => r.sha),
+	);
+	const hasRemoteRefs = $derived(remoteTipShas.length > 0);
+	const remoteReachable = $derived.by(() => {
+		const parentsBySha = new Map<string, string[]>();
+		for (const r of rows) if (r.kind === "commit") parentsBySha.set(r.sha, r.parents);
+		const seen = new Set<string>();
+		const stack = [...remoteTipShas];
+		while (stack.length > 0) {
+			const sha = stack.pop()!;
+			if (seen.has(sha)) continue;
+			seen.add(sha);
+			const parents = parentsBySha.get(sha);
+			if (parents) for (const p of parents) if (!seen.has(p)) stack.push(p);
+		}
+		return seen;
+	});
+
+	function isUnpushed(row: WipRow | GraphViewRow): boolean {
+		return hasRemoteRefs && row.kind === "commit" && !remoteReachable.has(row.sha);
+	}
 
 	// The WIP row (§4.2) is synthesized here, not in the store, so the store stays a pure topology
 	// projection. It hangs off HEAD's lane; `allRows` is what the canvas, virtualization and DOM all
@@ -283,6 +310,16 @@
 			ctx.strokeStyle = c.accent;
 			ctx.lineWidth = 2;
 			ctx.stroke();
+		} else if (isUnpushed(row)) {
+			// Unpushed (local-only) commits get a dashed lane-colored halo so "not on the remote
+			// yet" is visible at a glance right in the graph.
+			ctx.beginPath();
+			ctx.arc(x, y, AVATAR_RADIUS + 2.5, 0, Math.PI * 2);
+			ctx.setLineDash([3, 3]);
+			ctx.strokeStyle = c.lanes[row.node.colorIndex] ?? c.muted;
+			ctx.lineWidth = 1.5;
+			ctx.stroke();
+			ctx.setLineDash([]);
 		}
 	}
 
@@ -304,7 +341,7 @@
 
 		ctx.save();
 		ctx.beginPath();
-		ctx.rect(graphLeft, 0, graphView.widths.graph, cssH);
+		ctx.rect(graphLeft, 0, graphView.graphAuto, cssH);
 		ctx.clip();
 
 		const lit = hoveredSha ? lineageKeys(hoveredSha) : null;
@@ -518,12 +555,28 @@
 		if (pill.localBranch) branchEdit.startRename(pill.localBranch, pill.sha);
 	}
 
+	// Auto-size the GRAPH column to the lanes actually drawn: widest lane across the topology
+	// (nodes and passing segments), clamped by the store. The column collapses to near-nothing on
+	// a linear repo and grows as branches fan out — never crowding MESSAGE, never clipping lanes.
+	$effect(() => {
+		let maxLane = 0;
+		for (const row of allRows) {
+			if (row.node.lane > maxLane) maxLane = row.node.lane;
+			for (const seg of row.segments) {
+				if (seg.from.at !== "node" && seg.from.lane > maxLane) maxLane = seg.from.lane;
+				if (seg.to.at !== "node" && seg.to.lane > maxLane) maxLane = seg.to.lane;
+			}
+		}
+		graphView.setGraphAuto(graphWidthForLanes(maxLane));
+	});
+
 	// Redraw whenever the data, layout, hover or scroll offset changes; rAF coalesces bursts.
 	$effect(() => {
 		void allRows;
 		void graph.metaBySha;
 		void graphView.widths.branch;
-		void graphView.widths.graph;
+		void graphView.graphAuto;
+		void remoteReachable;
 		void hoveredSha;
 		void scrollTop;
 		void theme.resolved;

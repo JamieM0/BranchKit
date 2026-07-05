@@ -104,6 +104,18 @@ fn translate(stderr: &str) -> Option<(String, Suggestion)> {
             Suggestion::new("Retry", "retry-offline"),
         ));
     }
+    if lower.contains("does not appear to be a git repository")
+        || lower.contains("no configured push destination")
+        || (lower.contains("could not read from remote repository")
+            && !lower.contains("permission denied"))
+    {
+        return Some((
+            "This repository has no reachable remote — add one (e.g. `git remote add origin <url>`) \
+             or check the remote's URL"
+                .to_string(),
+            Suggestion::new("Show details", "details"),
+        ));
+    }
     if lower.contains("non-fast-forward") || lower.contains("fetch first") {
         return Some((
             "The remote has commits you don't have yet".to_string(),

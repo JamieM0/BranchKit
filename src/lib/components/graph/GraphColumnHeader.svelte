@@ -47,18 +47,9 @@
 		></div>
 	</div>
 
-	<div class="cell" role="columnheader" style="width: {graphView.widths.graph}px;">
-		<span>GRAPH</span>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="handle"
-			class:active={drag?.column === "graph"}
-			onpointerdown={(e) => startResize(e, "graph")}
-			onpointermove={onResizeMove}
-			onpointerup={endResize}
-			ondblclick={() => resetWidth("graph")}
-		></div>
-	</div>
+	<!-- The GRAPH column is unlabeled and auto-sizes to the lanes it actually draws (no manual
+	     resize handle) — the lanes are self-explanatory and the column should never crowd MESSAGE. -->
+	<div class="cell" role="columnheader" aria-label="Graph" style="width: {graphView.graphAuto}px;"></div>
 
 	<div class="cell grow" role="columnheader"><span>MESSAGE</span></div>
 

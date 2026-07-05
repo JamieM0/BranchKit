@@ -1,4 +1,7 @@
 <script lang="ts">
+	// phosphor-svelte: icon set requested by Jamie (replaces the emoji glyphs the spec's Lucide
+	// suggestion originally shipped as) — the only icon dependency in the app.
+	import { Check, Cloud, GitPullRequest, Laptop, Tag } from "phosphor-svelte";
 	import type { Pill } from "$lib/graph/pills";
 	import { dnd } from "$lib/stores/dnd.svelte";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
@@ -127,14 +130,14 @@
 	ondragleave={onDragLeave}
 	ondrop={handleDrop}
 >
-	{#if pill.isHead}<span class="check" title="checked out" aria-hidden="true">✓</span>{/if}
-	{#if pill.kind === "tag"}<span class="tag-glyph" aria-hidden="true">🏷</span>{/if}
+	{#if pill.isHead}<span class="check" title="checked out" aria-hidden="true"><Check size={10} weight="bold" /></span>{/if}
+	{#if pill.kind === "tag"}<span class="icon" aria-hidden="true"><Tag size={10} /></span>{/if}
 	<span class="name">{pill.name}</span>
 	{#if pill.kind === "branch"}
-		{#if pill.local}<span class="presence" title="exists locally" aria-label="local">💻</span>{/if}
-		{#if pill.remote}<span class="presence" title={pill.remoteName ?? "remote"} aria-label="remote">☁</span>{/if}
+		{#if pill.local}<span class="icon presence" title="exists locally" aria-label="local"><Laptop size={11} /></span>{/if}
+		{#if pill.remote}<span class="icon presence" title={pill.remoteName ?? "remote"} aria-label="remote"><Cloud size={11} /></span>{/if}
 		{#if matchingPr}
-			<span class="presence" title="PR #{matchingPr.number}: {matchingPr.title}" aria-label="has pull request">🔀</span>
+			<span class="icon presence" title="PR #{matchingPr.number}: {matchingPr.title}" aria-label="has pull request"><GitPullRequest size={11} /></span>
 		{/if}
 	{/if}
 	{#if hasBadge}
@@ -202,18 +205,19 @@
 	}
 
 	.check {
+		display: inline-flex;
+		align-items: center;
 		color: var(--accent);
-		font-size: 10px;
 	}
 
-	.tag-glyph {
-		font-size: 9px;
+	.icon {
+		display: inline-flex;
+		align-items: center;
+		line-height: 1;
 	}
 
 	.presence {
-		font-size: 9px;
-		line-height: 1;
-		filter: grayscale(0.2);
+		color: var(--text-muted);
 	}
 
 	.name {

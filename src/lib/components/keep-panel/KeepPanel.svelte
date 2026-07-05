@@ -214,7 +214,7 @@
 		</div>
 
 		<!-- the single document -->
-		<div class="document" bind:this={scroller} class:done={store.allResolved}>
+		<div class="document selectable" bind:this={scroller} class:done={store.allResolved}>
 			{#each store.regions as region, i (i)}
 				{#if region.kind === "conflict"}
 					<ConflictRegionCard

@@ -134,9 +134,23 @@
     }
   }
 
+  /** True when the event originates from a text-editing surface — global app shortcuts must not
+   * fire while the user is typing (Cmd+S in a commit summary should never stash). Cmd+K stays
+   * live everywhere: the palette is the escape hatch, and opening it can't destroy typed work. */
+  function isEditableTarget(e: KeyboardEvent): boolean {
+    const t = e.target;
+    if (!(t instanceof HTMLElement)) return false;
+    return (
+      t instanceof HTMLInputElement ||
+      t instanceof HTMLTextAreaElement ||
+      t.isContentEditable
+    );
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if (!isModEvent(e)) return;
     const key = e.key.toLowerCase();
+    if (isEditableTarget(e) && key !== "k") return;
     const id = repos.activeId && !repos.activeId.startsWith("pending:") ? repos.activeId : null;
     const branch = graph.head && !graph.head.detached ? graph.head.branch : null;
     if (key === "k") {

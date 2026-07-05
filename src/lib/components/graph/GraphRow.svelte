@@ -170,7 +170,7 @@
 		{/if}
 	</div>
 
-	<div class="cell graph" style="width: {graphView.widths.graph}px;" aria-hidden="true"></div>
+	<div class="cell graph" style="width: {graphView.graphAuto}px;" aria-hidden="true"></div>
 
 	<div class="cell message grow">
 		{#if row.kind === "stash"}
@@ -224,13 +224,19 @@
 		transition: background var(--motion-hover), opacity var(--motion-hover);
 	}
 
+	/* The checked-out commit: accent edge bar + a faint accent wash across the whole row, so HEAD
+	 * is findable at a glance even when its pill is scrolled out of the BRANCH/TAG column. */
+	.row.head {
+		background: color-mix(in srgb, var(--accent) 7%, transparent);
+	}
+
 	.row.head::before {
 		content: "";
 		position: absolute;
 		left: 0;
 		top: 0;
 		bottom: 0;
-		width: 2px;
+		width: 3px;
 		background: var(--accent);
 	}
 
@@ -238,8 +244,10 @@
 		background: color-mix(in srgb, var(--raised) 45%, transparent);
 	}
 
+	/* Selection reads unmistakably: stronger wash + a full inset ring (§4.3). */
 	.row.selected {
-		background: color-mix(in srgb, var(--accent) 16%, transparent);
+		background: color-mix(in srgb, var(--accent) 18%, transparent);
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
 	}
 
 	/* Universal-filter dim — context preserved, never removed (§15.24). */

@@ -104,7 +104,7 @@
 			{/if}
 		</div>
 
-		<div class="message">
+		<div class="message selectable">
 			<p class="subject">{meta.subject}</p>
 			{#if meta.body}<pre class="body">{meta.body}</pre>{/if}
 		</div>

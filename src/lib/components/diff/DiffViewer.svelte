@@ -330,7 +330,7 @@
 		</div>
 	</div>
 
-	<div class="body">
+	<div class="body selectable">
 		{#if loading}
 			<p class="empty">Loading diff…</p>
 		{:else if loadError}
@@ -878,8 +878,18 @@
 		color: var(--status-deleted);
 	}
 
-	.content span.changed {
-		background: color-mix(in srgb, var(--accent) 35%, transparent);
+	/* Intra-line word emphasis stays in the SAME hue as its row — a deeper red inside removed
+	 * lines, a deeper green inside added lines. (Previously this was accent-green on both sides,
+	 * which put green blocks inside red lines — visually incoherent.) */
+	tr.del .content span.changed,
+	td.content.del span.changed {
+		background: color-mix(in srgb, var(--status-deleted) 32%, transparent);
+		border-radius: 2px;
+	}
+
+	tr.add .content span.changed,
+	td.content.add span.changed {
+		background: color-mix(in srgb, var(--status-added) 32%, transparent);
 		border-radius: 2px;
 	}
 

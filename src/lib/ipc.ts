@@ -263,6 +263,11 @@ export async function getRemoteUrl(repoId: string, remote: string): Promise<stri
   return invoke("get_remote_url", { repoId, remote });
 }
 
+/** Configured remote names — drives the toolbar's Publish disabled state on remote-less repos. */
+export async function listRemotes(repoId: string): Promise<string[]> {
+  return invoke("list_remotes", { repoId });
+}
+
 export async function ignorePath(repoId: string, pattern: string): Promise<void> {
   return invoke("ignore_path", { repoId, pattern });
 }

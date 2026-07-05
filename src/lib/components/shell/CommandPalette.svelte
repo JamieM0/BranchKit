@@ -66,7 +66,7 @@
 			.map((r): Row => ({
 				section: "Branches",
 				label: r.shortName,
-				hint: r.kind === "remoteBranch" ? "☁" : undefined,
+				hint: r.kind === "remoteBranch" ? "remote" : undefined,
 				run: (mergeIntoCurrent) => {
 					if (mergeIntoCurrent && currentBranch && r.shortName !== currentBranch) {
 						void actions.mergeInto(repoId, r.shortName, currentBranch);

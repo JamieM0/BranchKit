@@ -99,6 +99,7 @@ pub fn run() {
             git::ops::create_tag,
             git::ops::delete_tag,
             git::ops::get_remote_url,
+            git::ops::list_remotes,
             git::ops::ignore_path,
             git::stash::stash_push,
             git::stash::stash_pop,

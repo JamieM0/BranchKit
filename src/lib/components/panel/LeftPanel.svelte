@@ -1,4 +1,16 @@
 <script lang="ts">
+	// phosphor-svelte: icon set requested by Jamie (replaces emoji glyphs).
+	import {
+		Archive,
+		Cloud,
+		Eye,
+		EyeSlash,
+		GitBranch,
+		Link,
+		Lock,
+		Plus,
+		Tag,
+	} from "phosphor-svelte";
 	import type { RefInfo } from "$lib/types";
 	import type { Pill } from "$lib/graph/pills";
 	import { buildPanelModel } from "$lib/graph/panel";
@@ -215,10 +227,10 @@
 	{#if settings.leftPanelCollapsed}
 		<div class="rail">
 			<button type="button" class="rail-btn" title="Expand panel" onclick={() => settings.toggleLeftPanel()}>›</button>
-			<button type="button" class="rail-btn" title="Local branches" aria-label="Local branches">💻<span class="rail-count">{model.locals.length}</span></button>
-			<button type="button" class="rail-btn" title="Remotes" aria-label="Remotes">☁<span class="rail-count">{model.remotes.reduce((n, g) => n + g.branches.length, 0)}</span></button>
-			<button type="button" class="rail-btn" title="Tags" aria-label="Tags">🏷<span class="rail-count">{model.tags.length}</span></button>
-			<button type="button" class="rail-btn" title="Stashes" aria-label="Stashes">📦<span class="rail-count">{graph.stashes.length}</span></button>
+			<button type="button" class="rail-btn" title="Local branches" aria-label="Local branches"><GitBranch size={14} /><span class="rail-count">{model.locals.length}</span></button>
+			<button type="button" class="rail-btn" title="Remotes" aria-label="Remotes"><Cloud size={14} /><span class="rail-count">{model.remotes.reduce((n, g) => n + g.branches.length, 0)}</span></button>
+			<button type="button" class="rail-btn" title="Tags" aria-label="Tags"><Tag size={14} /><span class="rail-count">{model.tags.length}</span></button>
+			<button type="button" class="rail-btn" title="Stashes" aria-label="Stashes"><Archive size={14} /><span class="rail-count">{graph.stashes.length}</span></button>
 		</div>
 	{:else}
 		<div class="head">
@@ -256,7 +268,7 @@
 						>
 							{#if pill.isHead}<span class="dot" aria-label="checked out"></span>{/if}
 							<span class="name">{row.local.shortName}</span>
-							{#if row.tracked}<span class="presence" title={row.tracked.shortName}>☁</span>{/if}
+							{#if row.tracked}<span class="presence" title={row.tracked.shortName}><Cloud size={11} /></span>{/if}
 							<span class="badges">
 								{#if row.local.ahead > 0}<span class="ab ahead">↑{row.local.ahead}</span>{/if}
 								{#if row.local.behind > 0}<span class="ab behind">↓{row.local.behind}</span>{/if}
@@ -270,7 +282,7 @@
 								onclick={(e) => {
 									e.stopPropagation();
 									filter.toggleHidden(row.local.shortName);
-								}}>👁</button
+								}}>{#if filter.isHidden(row.local.shortName)}<EyeSlash size={12} />{:else}<Eye size={12} />{/if}</button
 							>
 						</div>
 					{/each}
@@ -297,7 +309,7 @@
 								ondblclick={() => checkoutPill(pill)}
 								oncontextmenu={(e) => openMenu(pill, e)}
 							>
-								<span class="presence" aria-hidden="true">☁</span>
+								<span class="presence" aria-hidden="true"><Cloud size={11} /></span>
 								<span class="name">{pill.name}</span>
 							</div>
 						{/each}
@@ -314,7 +326,7 @@
 				{#if sectionOpen("prs")}
 					{#if !github.connected}
 						<button type="button" class="row connect-gh" onclick={() => settingsWindow.show("integrations")}>
-							<span class="presence" aria-hidden="true">🔗</span>
+							<span class="presence" aria-hidden="true"><Link size={11} /></span>
 							<span class="name">Connect GitHub</span>
 						</button>
 					{:else}
@@ -327,7 +339,7 @@
 						{/each}
 						{#if prs.length === 0}<p class="empty">No open pull requests</p>{/if}
 						<button type="button" class="row add-pr" onclick={() => prPanel.openCreate()}>
-							<span class="presence" aria-hidden="true">＋</span>
+							<span class="presence" aria-hidden="true"><Plus size={11} /></span>
 							<span class="name">New pull request</span>
 						</button>
 					{/if}
@@ -351,7 +363,7 @@
 								onmouseleave={() => onRowHover(null)}
 								oncontextmenu={(e) => openTagMenu(tag.shortName, e)}
 							>
-								<span class="presence" aria-hidden="true">🏷</span>
+								<span class="presence" aria-hidden="true"><Tag size={11} /></span>
 								<span class="name">{tag.shortName}</span>
 							</div>
 						{/each}
@@ -377,7 +389,7 @@
 								onmouseleave={() => onRowHover(null)}
 								oncontextmenu={(e) => openStashMenu(stash.selector, stash.subject, e)}
 							>
-								<span class="presence" aria-hidden="true">📦</span>
+								<span class="presence" aria-hidden="true"><Archive size={11} /></span>
 								<span class="name stash">{stash.subject || stash.selector}</span>
 							</div>
 						{/each}
@@ -399,7 +411,7 @@
 						aria-label="Create a worktree"
 						onclick={() => worktreeDialog.open(currentBranch ?? "HEAD")}
 					>
-						＋
+						<Plus size={12} />
 					</button>
 				</div>
 				{#if sectionOpen("worktrees")}
@@ -415,7 +427,7 @@
 							<span class="status-dot" class:open-tab={isOpenTab} aria-hidden="true"></span>
 							<span class="name">{wt.branch ?? wt.head.slice(0, 7)}</span>
 							{#if wt.isMain}<span class="tagpill">main</span>{/if}
-							{#if wt.locked}<span class="presence" title="Locked">🔒</span>{/if}
+							{#if wt.locked}<span class="presence" title="Locked"><Lock size={11} /></span>{/if}
 						</div>
 					{/each}
 					{#if worktrees.length === 0}<p class="empty">No linked worktrees</p>{/if}
