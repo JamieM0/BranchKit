@@ -11,6 +11,7 @@
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Once;
 use zeroize::Zeroizing;
 
 const SERVICE: &str = "BranchKit";
@@ -21,7 +22,28 @@ fn account_for(host: &str, username: &str) -> String {
     format!("{host}:{username}")
 }
 
+static INIT_DEFAULT_STORE: Once = Once::new();
+
+/// Works around a bug in `keyring` 4.1.3's `v1` shim (see the `keyring-core` dependency comment
+/// in Cargo.toml): its lazy default-store init never actually runs, so every `Entry::new()` call
+/// fails with `NoDefaultStore` unless something else sets a default store first. This replicates
+/// the platform-specific setup the shim was supposed to do, once per process.
+fn ensure_default_store() {
+    INIT_DEFAULT_STORE.call_once(|| {
+        #[cfg(target_os = "macos")]
+        let store = apple_native_keyring_store::keychain::Store::new();
+        #[cfg(target_os = "windows")]
+        let store = windows_native_keyring_store::Store::new();
+        #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
+        let store = zbus_secret_service_keyring_store::Store::new();
+        if let Ok(store) = store {
+            keyring_core::set_default_store(store);
+        }
+    });
+}
+
 fn entry(account: &str) -> Result<Entry, keyring::Error> {
+    ensure_default_store();
     Entry::new(SERVICE, account)
 }
 

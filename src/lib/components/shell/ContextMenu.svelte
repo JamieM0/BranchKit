@@ -37,6 +37,23 @@
 	let submenuPos = $state<{ x: number; y: number } | null>(null);
 	let hoverTimer: ReturnType<typeof setTimeout> | undefined;
 
+	/** Pixel gutter kept between the menu and the viewport edge so it never touches the screen
+	 * border (and never flows off the visible area — root menus and recursive submenus alike). */
+	const edgeMargin = 4;
+	let menuWidth = $state(0);
+	let menuHeight = $state(0);
+
+	const clampedX = $derived(
+		menuWidth === 0
+			? x
+			: Math.max(edgeMargin, Math.min(x, window.innerWidth - menuWidth - edgeMargin)),
+	);
+	const clampedY = $derived(
+		menuHeight === 0
+			? y
+			: Math.max(edgeMargin, Math.min(y, window.innerHeight - menuHeight - edgeMargin)),
+	);
+
 	function enterItem(i: number, item: MenuItem, e: MouseEvent) {
 		clearTimeout(hoverTimer);
 		if (item.type !== "submenu") {
@@ -59,7 +76,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 <div class="scrim" onclick={onDismiss} oncontextmenu={(e) => e.preventDefault()}></div>
-<div class="menu" role="menu" aria-label={ariaLabel} style="left: {x}px; top: {y}px;">
+<div class="menu" role="menu" aria-label={ariaLabel} bind:clientWidth={menuWidth} bind:clientHeight={menuHeight} style="left: {clampedX}px; top: {clampedY}px;">
 	{#each items as item, i (i)}
 		{#if item.type === "separator"}
 			<div class="sep"></div>
@@ -125,6 +142,8 @@
 		z-index: 91;
 		min-width: 220px;
 		max-width: 320px;
+		max-height: calc(100vh - 8px);
+		overflow-y: auto;
 		padding: var(--space-1);
 		background: var(--overlay);
 		border: 1px solid var(--border);

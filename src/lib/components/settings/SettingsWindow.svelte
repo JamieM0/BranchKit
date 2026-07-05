@@ -4,8 +4,10 @@
 	import { settings } from "$lib/stores/settings.svelte";
 	import { theme } from "$lib/stores/theme.svelte";
 	import { github } from "$lib/stores/github.svelte";
+	import { ai } from "$lib/stores/ai.svelte";
+	import { asAppError } from "$lib/actions";
 	import * as ipc from "$lib/ipc";
-	import type { CredentialInfo, SshAgentStatus, SshKeyInfo } from "$lib/types";
+	import type { AiTestResult, CredentialInfo, SshAgentStatus, SshKeyInfo } from "$lib/types";
 	import RevealSection from "./RevealSection.svelte";
 	import SettingField from "./SettingField.svelte";
 
@@ -93,6 +95,65 @@
 			void github.checkConnection();
 		}
 	});
+
+	// --- AI section (ARCHITECTURE.md §10, DESIGN_SPEC.md §13) ---
+	let remoteApiKeyDraft = $state("");
+	let remoteTestBusy = $state(false);
+	let remoteTestResult: AiTestResult | null = $state(null);
+	let remoteKeySaveError: { message: string; raw: string } | null = $state(null);
+
+	$effect(() => {
+		if (settingsWindow.open && settingsWindow.section === "ai") {
+			void ai.refreshLocalModelState();
+			void ai.refreshRemoteKeyConfigured();
+		}
+	});
+
+	// Re-check the Ollama connection dot + model list whenever its URL changes while the section
+	// is open (and once when first opened) — DESIGN_SPEC.md §13.
+	$effect(() => {
+		const url = appSettings.current.ai.ollamaBaseUrl;
+		if (settingsWindow.open && settingsWindow.section === "ai" && appSettings.current.ai.provider === "ollama") {
+			void ai.refreshOllama(url);
+		}
+	});
+
+	async function testRemoteConnection() {
+		remoteTestBusy = true;
+		remoteTestResult = null;
+		try {
+			remoteTestResult = await ipc.testRemoteConnection($state.snapshot(appSettings.current.ai));
+		} catch (e) {
+			remoteTestResult = { ok: false, message: e instanceof Error ? e.message : String(e) };
+		} finally {
+			remoteTestBusy = false;
+		}
+	}
+
+	async function saveRemoteApiKey() {
+		const key = remoteApiKeyDraft.trim();
+		if (!key) return;
+		remoteKeySaveError = null;
+		try {
+			await ipc.setRemoteApiKey(key);
+			remoteApiKeyDraft = "";
+			await ai.refreshRemoteKeyConfigured();
+		} catch (e) {
+			const err = asAppError(e);
+			remoteKeySaveError = { message: err.userMessage, raw: err.raw };
+		}
+	}
+
+	async function removeRemoteApiKey() {
+		remoteKeySaveError = null;
+		try {
+			await ipc.removeRemoteApiKey();
+			await ai.refreshRemoteKeyConfigured();
+		} catch (e) {
+			const err = asAppError(e);
+			remoteKeySaveError = { message: err.userMessage, raw: err.raw };
+		}
+	}
 </script>
 
 {#if settingsWindow.open}
@@ -379,35 +440,87 @@
 							<div class="model-card">
 								<div class="model-card-head">
 									<span>Gemma 3 1B (Q4, ~800 MB)</span>
-									<span class="badge-muted">Not downloaded</span>
+									{#if ai.localModelState === "ready"}
+										<span class="badge-ready">✓ Ready</span>
+									{:else if ai.downloading}
+										<span class="badge-muted">Downloading…</span>
+									{:else}
+										<span class="badge-muted">Not downloaded</span>
+									{/if}
 								</div>
-								<p class="hint">Runs entirely on this machine. Downloading and running the local model lands in a later prompt.</p>
+
+								{#if ai.downloading}
+									<div class="download-progress">
+										<div class="progress-track">
+											<div
+												class="progress-fill"
+												style="width: {ai.downloadProgress?.percent ?? 0}%"
+											></div>
+										</div>
+										<div class="progress-stats">
+											<span>{ai.downloadProgress?.phase ?? "Starting…"}</span>
+											<span>
+												{ai.downloadProgress?.percent ?? 0}%
+												{#if ai.downloadProgress?.mbps}· {ai.downloadProgress.mbps.toFixed(1)} MB/s{/if}
+											</span>
+										</div>
+									</div>
+									<button type="button" class="secondary" onclick={() => void ai.cancel()}>Cancel</button>
+								{:else if ai.localModelState === "ready"}
+									<button type="button" class="secondary" onclick={() => void ai.remove()}>Remove</button>
+								{:else}
+									<button type="button" class="primary" onclick={() => void ai.download()}>Download</button>
+								{/if}
+
+								{#if ai.downloadError}
+									<p class="error-text">{ai.downloadError}</p>
+								{/if}
+								<p class="hint">Runs entirely on this machine.</p>
 							</div>
 						</RevealSection>
 
 						<RevealSection open={appSettings.current.ai.provider === "ollama"}>
 							<SettingField label="Ollama URL" description="Where your local Ollama server is listening.">
-								<input
-									type="text"
-									class="text-input"
-									value={appSettings.current.ai.ollamaBaseUrl}
-									onchange={(e) =>
-										appSettings.update((d) => {
-											d.ai.ollamaBaseUrl = e.currentTarget.value;
-										})}
-								/>
+								<div class="inline-field">
+									<span
+										class="connection-dot"
+										class:connected={ai.ollamaConnected}
+										title={ai.ollamaConnected ? "Connected" : "Not reachable"}
+									></span>
+									<input
+										type="text"
+										class="text-input"
+										value={appSettings.current.ai.ollamaBaseUrl}
+										onchange={(e) => {
+											const url = e.currentTarget.value;
+											appSettings.update((d) => {
+												d.ai.ollamaBaseUrl = url;
+											});
+											void ai.refreshOllama(url);
+										}}
+									/>
+									<button
+										type="button"
+										class="secondary"
+										onclick={() => void ai.refreshOllama(appSettings.current.ai.ollamaBaseUrl)}
+									>
+										Refresh
+									</button>
+								</div>
 							</SettingField>
-							<SettingField label="Model" description="Populated from /api/tags once the provider is wired up.">
-								<input
-									type="text"
-									class="text-input"
-									placeholder="e.g. llama3.1"
+							<SettingField label="Model" description="Populated from /api/tags.">
+								<select
 									value={appSettings.current.ai.ollamaModel ?? ""}
 									onchange={(e) =>
 										appSettings.update((d) => {
 											d.ai.ollamaModel = e.currentTarget.value || null;
 										})}
-								/>
+								>
+									<option value="">Select a model…</option>
+									{#each ai.ollamaModels as model (model)}
+										<option value={model}>{model}</option>
+									{/each}
+								</select>
 							</SettingField>
 						</RevealSection>
 
@@ -435,8 +548,28 @@
 										})}
 								/>
 							</SettingField>
-							<SettingField label="API key" description="Stored in your OS keychain, never written to a config file.">
-								<input type="password" class="text-input" placeholder="Provider activation lands in a later prompt" disabled />
+							<SettingField label="API key" description="Stored in your OS keychain, never written to a config file — persists as soon as you leave the field, like every other setting here.">
+								<div class="inline-field">
+									<input
+										type="password"
+										class="text-input"
+										placeholder={ai.remoteKeyConfigured ? "•••• stored" : "Paste your API key"}
+										bind:value={remoteApiKeyDraft}
+										onchange={() => void saveRemoteApiKey()}
+									/>
+									{#if ai.remoteKeyConfigured}
+										<button type="button" class="secondary" onclick={() => void removeRemoteApiKey()}>Remove</button>
+									{/if}
+								</div>
+								{#if remoteKeySaveError}
+									<span class="test-result fail">✗ {remoteKeySaveError.message}</span>
+									{#if remoteKeySaveError.raw}
+										<details class="key-error-details">
+											<summary>Details</summary>
+											<pre>{remoteKeySaveError.raw}</pre>
+										</details>
+									{/if}
+								{/if}
 							</SettingField>
 							<SettingField label="Model name" description="Passed as the model field on every request.">
 								<input
@@ -449,6 +582,16 @@
 										})}
 								/>
 							</SettingField>
+							<div class="test-row">
+								<button type="button" class="secondary" disabled={remoteTestBusy} onclick={() => void testRemoteConnection()}>
+									{remoteTestBusy ? "Testing…" : "Test"}
+								</button>
+								{#if remoteTestResult}
+									<span class="test-result" class:ok={remoteTestResult.ok} class:fail={!remoteTestResult.ok}>
+										{remoteTestResult.ok ? "✓" : "✗"} {remoteTestResult.message}
+									</span>
+								{/if}
+							</div>
 						</RevealSection>
 
 						<SettingField label="Style" description="Plain sentences, or Conventional Commits formatting.">
@@ -824,6 +967,106 @@
 		margin-left: var(--space-2);
 		font-size: 11px;
 		color: var(--text-muted);
+	}
+
+	.badge-ready {
+		color: var(--accent);
+		font-size: 11px;
+		font-weight: 600;
+	}
+
+	.download-progress {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.progress-track {
+		height: 6px;
+		border-radius: 999px;
+		background: var(--border-soft);
+		overflow: hidden;
+	}
+
+	.progress-fill {
+		height: 100%;
+		background: var(--accent);
+		transition: width 180ms ease-out;
+	}
+
+	.progress-stats {
+		display: flex;
+		justify-content: space-between;
+		font-size: 11px;
+		color: var(--text-muted);
+	}
+
+	.error-text {
+		margin: 0;
+		font-size: 11px;
+		color: var(--danger);
+	}
+
+	.inline-field {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.inline-field .text-input {
+		flex: 1;
+	}
+
+	.connection-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--text-faint);
+		flex-shrink: 0;
+	}
+
+	.connection-dot.connected {
+		background: var(--accent);
+	}
+
+	.test-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		margin-top: var(--space-1);
+	}
+
+	.test-result {
+		font-size: 11px;
+	}
+
+	.test-result.ok {
+		color: var(--accent);
+	}
+
+	.test-result.fail {
+		color: var(--danger);
+	}
+
+	.key-error-details {
+		margin-top: var(--space-1);
+	}
+
+	.key-error-details summary {
+		cursor: pointer;
+		color: var(--text-muted);
+		font-size: 11px;
+	}
+
+	.key-error-details pre {
+		margin: var(--space-1) 0 0;
+		max-height: 140px;
+		overflow: auto;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-muted);
+		white-space: pre-wrap;
+		word-break: break-word;
 	}
 
 	.gh-connected {

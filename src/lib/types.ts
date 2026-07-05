@@ -376,6 +376,26 @@ export interface AppSettings {
 	ai: AiSettings;
 }
 
+// --- ai/ ---------------------------------------------------------
+
+export type LocalModelState = "notDownloaded" | "ready";
+
+export interface LocalDownloadProgress {
+	phase: string;
+	percent: number | null;
+	mbps: number;
+}
+
+export interface GeneratedCommitMessage {
+	summary: string;
+	description: string;
+}
+
+export interface AiTestResult {
+	ok: boolean;
+	message: string;
+}
+
 // --- credentials.rs ---------------------------------------------------------
 
 export interface CredentialInfo {

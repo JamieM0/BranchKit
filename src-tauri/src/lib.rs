@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod credentials;
 pub mod error;
 pub mod events;
@@ -35,9 +36,16 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
+        .manage(ai::AiState::default())
         .setup(|app| {
             // Best-effort discard-trash purge (ARCHITECTURE.md §7.3) — never blocks startup.
             git::discard::purge_old_entries(&app.handle().clone());
+            // Reap a `llama-server` left running by a previous session that crashed or was
+            // force-quit before it could clean up its own pidfile (ARCHITECTURE.md §10).
+            ai::local::reap_orphan(&app.handle().clone());
+            // The 5-minute idle-kill monitor for the local AI sidecar — runs for the app's
+            // lifetime (ARCHITECTURE.md §10).
+            tauri::async_runtime::spawn(ai::local::run_idle_monitor(app.handle().clone()));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -149,9 +157,27 @@ pub fn run() {
             github::api::create_pull_request,
             github::api::merge_pull_request,
             github::api::checkout_pr_head,
+            ai::generate_commit_message,
+            ai::local::get_local_model_state,
+            ai::local::download_local_model,
+            ai::local::cancel_local_download,
+            ai::local::remove_local_model,
+            ai::ollama::list_ollama_models,
+            ai::ollama::ping_ollama,
+            ai::remote::test_remote_connection,
+            ai::remote::set_remote_api_key,
+            ai::remote::remove_remote_api_key,
+            ai::remote::remote_api_key_configured,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Make sure the local AI sidecar (if running) doesn't outlive the app — ARCHITECTURE.md
+            // §10's "kill on app exit".
+            if let tauri::RunEvent::Exit = event {
+                ai::local::shutdown_sidecar_blocking(app_handle, &app_handle.state::<ai::AiState>());
+            }
+        });
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
+  AiTestResult,
   AppSettings,
   BlameRun,
   ChangedFile,
@@ -18,9 +19,12 @@ import type {
   FileConflictRegions,
   FileDiff,
   FileHistoryEntry,
+  GeneratedCommitMessage,
   GitIdentity,
   GithubUser,
   GraphTopologyRow,
+  LocalDownloadProgress,
+  LocalModelState,
   PullRequest,
   RecentRepo,
   RefsResponse,
@@ -626,4 +630,74 @@ export async function mergePullRequest(
  * the local branch name it created (`pr-<n>`). */
 export async function checkoutPrHead(repoId: string, number: number): Promise<string> {
   return invoke("checkout_pr_head", { repoId, number });
+}
+
+// --- AI (ARCHITECTURE.md §10, DESIGN_SPEC.md §7/§13) ---
+
+/** Generates a commit message from the staged diff (`staged: true`) or the full working-tree diff
+ * (§7's unstaged fallback). Resolves to the final parsed `{summary, description}`; live tokens
+ * stream via {@link onAiCommitToken} while this is in flight. */
+export async function generateCommitMessage(
+  repoId: string,
+  staged: boolean,
+): Promise<GeneratedCommitMessage> {
+  return invoke("generate_commit_message", { repoId, staged });
+}
+
+/** Subscribes to raw token text as the ✨ commit-message generation streams (DESIGN_SPEC.md §7). */
+export async function onAiCommitToken(handler: (token: string) => void): Promise<UnlistenFn> {
+  return listen<string>("ai://commit/token", (event) => handler(event.payload));
+}
+
+export async function getLocalModelState(): Promise<LocalModelState> {
+  return invoke("get_local_model_state");
+}
+
+/** Downloads the pinned llama-server binary + GGUF model; progress streams via
+ * {@link onLocalDownloadProgress}. Resolves once ready (or once cancelled — check state after). */
+export async function downloadLocalModel(): Promise<void> {
+  return invoke("download_local_model");
+}
+
+export async function cancelLocalDownload(): Promise<void> {
+  return invoke("cancel_local_download");
+}
+
+/** Deletes the local GGUF model and returns the model card to its Download state (DESIGN_SPEC §13). */
+export async function removeLocalModel(): Promise<void> {
+  return invoke("remove_local_model");
+}
+
+export async function onLocalDownloadProgress(
+  handler: (progress: LocalDownloadProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<LocalDownloadProgress>("ai://local/download-progress", (event) => handler(event.payload));
+}
+
+/** The Ollama model dropdown's data source (DESIGN_SPEC.md §13). */
+export async function listOllamaModels(baseUrl: string): Promise<string[]> {
+  return invoke("list_ollama_models", { baseUrl });
+}
+
+/** The Ollama URL field's connection dot — a quick reachability ping. */
+export async function pingOllama(baseUrl: string): Promise<boolean> {
+  return invoke("ping_ollama", { baseUrl });
+}
+
+/** Settings → AI → Remote API's Test button; sends a minimal live request (DESIGN_SPEC.md §13). */
+export async function testRemoteConnection(settings: AppSettings["ai"]): Promise<AiTestResult> {
+  return invoke("test_remote_connection", { settings });
+}
+
+export async function setRemoteApiKey(key: string): Promise<void> {
+  return invoke("set_remote_api_key", { key });
+}
+
+export async function removeRemoteApiKey(): Promise<void> {
+  return invoke("remove_remote_api_key");
+}
+
+/** Whether a remote API key is stored — never the key itself (ARCHITECTURE.md §8). */
+export async function remoteApiKeyConfigured(): Promise<boolean> {
+  return invoke("remote_api_key_configured");
 }

@@ -3,6 +3,8 @@
 	import { status } from "$lib/stores/status.svelte";
 	import { commitDraft } from "$lib/stores/commitDraft.svelte";
 	import { toasts } from "$lib/stores/toasts.svelte";
+	import { appSettings } from "$lib/stores/appSettings.svelte";
+	import { settingsWindow } from "$lib/stores/settingsWindow.svelte";
 	import { stagedRows, unstagedRows } from "$lib/status/sections";
 	import { isModEvent } from "$lib/platform";
 	import * as ipc from "$lib/ipc";
@@ -10,8 +12,8 @@
 
 	/** Commit composer — DESIGN_SPEC.md §7. Lives at the bottom of the working-directory panel. The
 	 * summary/description bind to the shared {@link commitDraft} store so the graph's WIP-row inline
-	 * editor (§4.2) mirrors them live. The AI button is present-but-disabled until a provider is
-	 * configured (wired in a later prompt, §7). */
+	 * editor (§4.2) mirrors them live. The ✨ button generates from the staged diff (or the full WIP
+	 * diff when nothing is staged, with an inline hint), streaming tokens live into both fields. */
 
 	const repoId = $derived(graph.repoId);
 	const branch = $derived(
@@ -67,6 +69,7 @@
 		const ok = await actions.commit(repoId, opts);
 		if (ok) {
 			sweeping = true;
+			showAiChips = false;
 			setTimeout(() => (sweeping = false), 240);
 		}
 	}
@@ -96,8 +99,80 @@
 		}
 	}
 
+	// --- AI commit message (ARCHITECTURE.md §10, DESIGN_SPEC.md §7) ----------
+
+	let generating = $state(false);
+	let showAiChips = $state(false);
+	let usedUnstagedFallback = $state(false);
+
+	const aiEnabled = $derived(appSettings.current.ai.enabled);
+	// Only actually *disables* the button once AI is configured — when it isn't, the button stays
+	// clickable so it can deep-link to Settings → AI instead (§7's disabled-tooltip requirement).
+	const aiButtonDisabled = $derived(aiEnabled && ((!hasStaged && !hasWip) || generating));
+
 	function aiTooltip() {
-		return "Configure an AI provider in Settings → AI to generate commit messages";
+		if (!aiEnabled) return "Configure an AI provider in Settings → AI to generate commit messages";
+		if (!hasStaged && !hasWip) return "Nothing to generate a message from yet";
+		return "Generate a commit message with AI";
+	}
+
+	function onAiButtonClick() {
+		if (aiEnabled) void generateAiMessage();
+		else settingsWindow.show("ai");
+	}
+
+	/** Splits the streamed-so-far text at its first line break: everything before → summary,
+	 * everything after (minus the blank separator) → description — live-mirrors the final parse
+	 * (ARCHITECTURE.md §10) so the fields fill in as tokens arrive rather than only at the end. */
+	function applyStreamedText(rawBuffer: string) {
+		// Small/local models routinely fence their reply despite being told not to (the backend
+		// strips this from the final parsed result too, `prompt::strip_wrapping_fence`) — skip a
+		// leading fence-only line here so it doesn't flash into the summary field mid-stream.
+		const buffer = rawBuffer.replace(/^```[^\n]*\n?/, "");
+		const idx = buffer.indexOf("\n");
+		if (idx === -1) {
+			commitDraft.summary = buffer;
+			commitDraft.description = "";
+		} else {
+			commitDraft.summary = buffer.slice(0, idx);
+			commitDraft.description = buffer.slice(idx + 1).replace(/^\n+/, "").replace(/```\s*$/, "").trimEnd();
+		}
+	}
+
+	async function generateAiMessage() {
+		if (!repoId || aiButtonDisabled) return;
+		const staged = hasStaged;
+		usedUnstagedFallback = !staged;
+		generating = true;
+		showAiChips = false;
+		commitDraft.summary = "";
+		commitDraft.description = "";
+		let buffer = "";
+		const unlisten = await ipc.onAiCommitToken((token) => {
+			buffer += token;
+			applyStreamedText(buffer);
+		});
+		try {
+			const result = await ipc.generateCommitMessage(repoId, staged);
+			commitDraft.summary = result.summary;
+			commitDraft.description = result.description;
+			showAiChips = true;
+		} catch (e) {
+			const message =
+				e && typeof e === "object" && "userMessage" in e
+					? String((e as Record<string, unknown>).userMessage)
+					: e instanceof Error
+						? e.message
+						: String(e);
+			toasts.pushError(message);
+		} finally {
+			unlisten();
+			generating = false;
+		}
+	}
+
+	function dismissAiChips() {
+		showAiChips = false;
 	}
 
 	// Grow the description to 8 lines, then scroll (§7). Re-runs on programmatic changes too
@@ -147,13 +222,27 @@
 		<button
 			type="button"
 			class="ai"
-			disabled
+			class:generating
+			class:unconfigured={!aiEnabled}
+			disabled={aiButtonDisabled}
 			aria-label="Generate commit message with AI"
 			title={aiTooltip()}
+			onclick={onAiButtonClick}
 		>
-			✨
+			{generating ? "…" : "✨"}
 		</button>
 	</div>
+
+	{#if usedUnstagedFallback && (generating || showAiChips)}
+		<p class="ai-hint">Generated from unstaged changes</p>
+	{/if}
+
+	{#if showAiChips}
+		<div class="ai-chips">
+			<button type="button" class="chip" onclick={() => void generateAiMessage()}>↻ Regenerate</button>
+			<button type="button" class="chip" onclick={dismissAiChips}>✕ Dismiss</button>
+		</div>
+	{/if}
 
 	<div class="desc-wrap">
 		<textarea
@@ -305,8 +394,68 @@
 		border-radius: var(--radius-control);
 		background: transparent;
 		font-size: 13px;
+		cursor: pointer;
+		opacity: 0.9;
+	}
+
+	.ai:hover:not(:disabled) {
+		background: var(--raised);
+	}
+
+	.ai.unconfigured {
+		opacity: 0.5;
+	}
+
+	.ai:disabled {
 		cursor: not-allowed;
 		opacity: 0.5;
+	}
+
+	.ai.generating {
+		cursor: wait;
+		animation: ai-pulse 900ms ease-in-out infinite;
+	}
+
+	@keyframes ai-pulse {
+		0%,
+		100% {
+			opacity: 0.5;
+		}
+		50% {
+			opacity: 1;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.ai.generating {
+			animation: none;
+		}
+	}
+
+	.ai-hint {
+		margin: 0;
+		font-size: 11px;
+		color: var(--text-faint);
+	}
+
+	.ai-chips {
+		display: flex;
+		gap: 6px;
+	}
+
+	.ai-chips .chip {
+		padding: 3px 8px;
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		background: var(--raised);
+		color: var(--text-muted);
+		font-size: 11px;
+		cursor: pointer;
+	}
+
+	.ai-chips .chip:hover {
+		background: var(--overlay);
+		color: var(--text);
 	}
 
 	.desc-wrap {

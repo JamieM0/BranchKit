@@ -33,6 +33,7 @@
   import { network, retryOnFocus } from "$lib/stores/network.svelte";
   import { notifyBehindIncrease, resetBehindTracking } from "$lib/stores/behindNotifier";
   import { appSettings } from "$lib/stores/appSettings.svelte";
+  import { ai } from "$lib/stores/ai.svelte";
   import { settingsWindow } from "$lib/stores/settingsWindow.svelte";
   import { github } from "$lib/stores/github.svelte";
   import { githubChecks } from "$lib/stores/githubChecks.svelte";
@@ -47,6 +48,7 @@
   $effect(() => {
     void appSettings.load();
     void github.checkConnection();
+    void ai.init();
   });
 
   // ARCHITECTURE.md §9/§14: once offline, retry a fetch as soon as the window regains focus

@@ -16,13 +16,13 @@ import { network } from "$lib/stores/network.svelte";
 import { credentialDialog } from "$lib/stores/credentialDialog.svelte";
 import { github } from "$lib/stores/github.svelte";
 
-interface AppErrorShape {
+export interface AppErrorShape {
 	userMessage: string;
 	raw: string;
 	suggestion: { label: string; actionId: string } | null;
 }
 
-function asAppError(e: unknown): AppErrorShape {
+export function asAppError(e: unknown): AppErrorShape {
 	if (e && typeof e === "object" && "userMessage" in e) {
 		const o = e as Record<string, unknown>;
 		const s = o.suggestion as Record<string, unknown> | null | undefined;
