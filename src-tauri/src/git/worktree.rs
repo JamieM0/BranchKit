@@ -5,12 +5,14 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::error::AppError;
+use crate::events::{ChangeKind, WatchedKind};
 use crate::state::AppState;
 
 use super::exec::{git, GitError, GitOpts};
+use super::ops::{emit_changes, require_repo};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -95,13 +97,77 @@ pub async fn get_worktrees(
     state: State<'_, AppState>,
     repo_id: String,
 ) -> Result<Vec<WorktreeInfo>, AppError> {
-    let handle = state.get_repo(&repo_id).ok_or_else(|| {
-        AppError::new(
-            "Repository is not open",
-            format!("unknown repo id {repo_id}"),
-        )
-    })?;
+    let handle = require_repo(&state, &repo_id)?;
     Ok(worktree_list(&handle.path).await?)
+}
+
+/// Creates a linked worktree at `path`, checked out to `start_ref` (a branch or commit). When
+/// `new_branch` is set, a new branch of that name is created at `start_ref` and checked out in the
+/// worktree in one action (`git worktree add -b <name> <path> <start_ref>`) — the create-dialog's
+/// branch-creator field (DESIGN_SPEC.md §5 WORKTREES).
+#[tauri::command]
+pub async fn create_worktree(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+    path: String,
+    start_ref: String,
+    new_branch: Option<String>,
+) -> Result<(), AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    handle.begin_self_op(&[WatchedKind::Refs]);
+    let mut args = vec!["worktree", "add"];
+    if let Some(name) = &new_branch {
+        args.push("-b");
+        args.push(name);
+    }
+    args.push(&path);
+    args.push(&start_ref);
+    git(&handle.path, &args, GitOpts::default()).await?;
+    emit_changes(&app, &repo_id, &[ChangeKind::Refs]);
+    Ok(())
+}
+
+/// Removes a linked worktree — `git worktree remove [--force] <path>`. Without `force`, git itself
+/// refuses when the worktree has uncommitted changes or untracked files, which is the "dirty-check
+/// guard" DESIGN_SPEC.md §5 asks for: the frontend calls this once, and on that specific failure
+/// offers an armed "Remove anyway" that retries with `force: true`.
+#[tauri::command]
+pub async fn remove_worktree(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+    path: String,
+    force: bool,
+) -> Result<(), AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    handle.begin_self_op(&[WatchedKind::Refs]);
+    let mut args = vec!["worktree", "remove"];
+    if force {
+        args.push("--force");
+    }
+    args.push(&path);
+    git(&handle.path, &args, GitOpts::default()).await?;
+    emit_changes(&app, &repo_id, &[ChangeKind::Refs]);
+    Ok(())
+}
+
+/// Prunes stale worktree administrative data — the WORKTREES section's "Prune all"
+/// (DESIGN_SPEC.md §5), for worktrees whose directory was deleted outside BranchKit.
+#[tauri::command]
+pub async fn prune_worktrees(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+) -> Result<(), AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    handle.begin_self_op(&[WatchedKind::Refs]);
+    git(&handle.path, &["worktree", "prune"], GitOpts::default()).await?;
+    emit_changes(&app, &repo_id, &[ChangeKind::Refs]);
+    Ok(())
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
+  BlameRun,
   ChangedFile,
   ChangeKind,
   CommitMeta,
@@ -10,6 +11,7 @@ import type {
   Divergence,
   FileConflictRegions,
   FileDiff,
+  FileHistoryEntry,
   GitIdentity,
   GraphTopologyRow,
   RecentRepo,
@@ -67,6 +69,46 @@ export async function getRefs(repoId: string): Promise<RefsResponse> {
 
 export async function getWorktrees(repoId: string): Promise<WorktreeInfo[]> {
   return invoke("get_worktrees", { repoId });
+}
+
+/** Creates a linked worktree at `path` checked out to `startRef`; `newBranch` set creates that
+ * branch at `startRef` in the same action — the create-worktree dialog (DESIGN_SPEC.md §5). */
+export async function createWorktree(
+  repoId: string,
+  path: string,
+  startRef: string,
+  newBranch: string | null,
+): Promise<void> {
+  return invoke("create_worktree", { repoId, path, startRef, newBranch });
+}
+
+/** Removes a linked worktree; `force` bypasses git's own dirty-check guard — call once without it,
+ * and only retry with `force: true` after the user confirms the armed "Remove anyway". */
+export async function removeWorktree(repoId: string, path: string, force: boolean): Promise<void> {
+  return invoke("remove_worktree", { repoId, path, force });
+}
+
+/** Prunes stale worktree administrative data — the WORKTREES section's "Prune all". */
+export async function pruneWorktrees(repoId: string): Promise<void> {
+  return invoke("prune_worktrees", { repoId });
+}
+
+// --- file history & blame (ARCHITECTURE.md §5.1-style follow, DESIGN_SPEC.md §6.3) ---
+
+export async function getFileHistory(repoId: string, path: string): Promise<FileHistoryEntry[]> {
+  return invoke("get_file_history", { repoId, path });
+}
+
+export async function getFileHistoryDiff(
+  repoId: string,
+  path: string,
+  sha: string,
+): Promise<FileDiff> {
+  return invoke("get_file_history_diff", { repoId, path, sha });
+}
+
+export async function getBlame(repoId: string, path: string): Promise<BlameRun[]> {
+  return invoke("get_blame", { repoId, path });
 }
 
 // --- mutations (ARCHITECTURE.md §7.1) — each runs through the repo op queue in Rust and emits its

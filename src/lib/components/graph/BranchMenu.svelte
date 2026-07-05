@@ -2,6 +2,7 @@
 	import type { Pill } from "$lib/graph/pills";
 	import * as actions from "$lib/actions";
 	import { filter } from "$lib/stores/filter.svelte";
+	import { worktreeDialog } from "$lib/stores/worktreeDialog.svelte";
 
 	/** Branch pill / panel-row right-click menu — GITKRAKEN_WORKFLOWS §3.2, DESIGN_SPEC §4.4.
 	 * Actions with backing ops run inline; Rename and "Create branch here" hand off to the graph's
@@ -107,6 +108,10 @@
 				Rebase <code>{currentBranch}</code> onto this
 			</button>
 		{/if}
+		<div class="sep"></div>
+		<button type="button" role="menuitem" onclick={() => run(() => worktreeDialog.open(sourceRef))}>
+			Create worktree from this branch…
+		</button>
 		<div class="sep"></div>
 		<button type="button" role="menuitem" onclick={copyName}>Copy branch name</button>
 		{#if pill.localBranch}

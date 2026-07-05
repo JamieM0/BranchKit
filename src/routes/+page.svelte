@@ -1,5 +1,6 @@
 <script lang="ts">
   import CloneDialog from "$lib/components/shell/CloneDialog.svelte";
+  import CreateWorktreeDialog from "$lib/components/shell/CreateWorktreeDialog.svelte";
   import EmptyState from "$lib/components/shell/EmptyState.svelte";
   import FirstLaunch from "$lib/components/shell/FirstLaunch.svelte";
   import RepoPicker from "$lib/components/shell/RepoPicker.svelte";
@@ -11,6 +12,7 @@
   import LeftPanel from "$lib/components/panel/LeftPanel.svelte";
   import RightPanel from "$lib/components/panel/RightPanel.svelte";
   import DiffViewer from "$lib/components/diff/DiffViewer.svelte";
+  import FileInspector from "$lib/components/diff/FileInspector.svelte";
   import ToastStack from "$lib/components/shell/ToastStack.svelte";
   import CommandPalette from "$lib/components/shell/CommandPalette.svelte";
   import { commandPalette } from "$lib/stores/commandPalette.svelte";
@@ -20,6 +22,8 @@
   import { graph } from "$lib/stores/graph.svelte";
   import { status } from "$lib/stores/status.svelte";
   import { diffView } from "$lib/stores/diffView.svelte";
+  import { fileInspector } from "$lib/stores/fileInspector.svelte";
+  import { worktreeDialog } from "$lib/stores/worktreeDialog.svelte";
   import { branchEdit } from "$lib/stores/branchEdit.svelte";
   import { graphNav } from "$lib/stores/graphNav.svelte";
   import { commitDraft } from "$lib/stores/commitDraft.svelte";
@@ -54,6 +58,7 @@
         status.open(id).catch((e) => console.error(e));
         keepSession.open(id).catch((e) => console.error(e));
         diffView.close();
+        fileInspector.close();
         // A half-typed commit draft shouldn't follow you into another repo (§7).
         commitDraft.reset();
       }
@@ -64,6 +69,7 @@
       void status.close();
       void keepSession.close();
       diffView.close();
+      fileInspector.close();
       commitDraft.reset();
     }
   });
@@ -172,6 +178,8 @@
         <div class="graph-area">
           {#if keepSession.panelOpen}
             <KeepPanel />
+          {:else if fileInspector.target}
+            <FileInspector path={fileInspector.target.path} onBack={() => fileInspector.close()} />
           {:else if diffView.target}
             <DiffViewer target={diffView.target} onBack={() => diffView.close()} />
           {:else}
@@ -197,6 +205,10 @@
 
 {#if showClone}
   <CloneDialog onDismiss={dismissClone} />
+{/if}
+
+{#if worktreeDialog.startRef !== null}
+  <CreateWorktreeDialog startRef={worktreeDialog.startRef} onDismiss={() => worktreeDialog.close()} />
 {/if}
 
 <style>

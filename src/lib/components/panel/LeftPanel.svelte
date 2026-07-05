@@ -8,10 +8,13 @@
 	import { filter } from "$lib/stores/filter.svelte";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
 	import { branchEdit } from "$lib/stores/branchEdit.svelte";
+	import { repos } from "$lib/stores/repo.svelte";
+	import { worktreeDialog } from "$lib/stores/worktreeDialog.svelte";
 	import * as actions from "$lib/actions";
 	import BranchMenu from "$lib/components/graph/BranchMenu.svelte";
 	import StashMenu from "$lib/components/graph/StashMenu.svelte";
 	import ContextMenu, { type MenuItem } from "$lib/components/shell/ContextMenu.svelte";
+	import type { WorktreeInfo } from "$lib/types";
 
 	/** The left panel — DESIGN_SPEC.md §5. Sections LOCAL / REMOTES / TAGS / STASHES / WORKTREES with
 	 * one universal filter box that fuzzy-filters every section and dims the graph (§15.24), the
@@ -104,6 +107,59 @@
 	let menu = $state<{ pill: Pill; x: number; y: number } | null>(null);
 	let stashMenu = $state<{ selector: string; subject: string; x: number; y: number } | null>(null);
 	let tagMenu = $state<{ name: string; x: number; y: number } | null>(null);
+	let worktreeMenu = $state<{ wt: WorktreeInfo; x: number; y: number } | null>(null);
+	let removeConfirm = $state<{ path: string; armed: boolean } | null>(null);
+	let armTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function openWorktreeMenu(wt: WorktreeInfo, e: MouseEvent) {
+		e.preventDefault();
+		worktreeMenu = { wt, x: e.clientX, y: e.clientY };
+	}
+
+	function openWorktreeTab(wt: WorktreeInfo) {
+		void repos.open(wt.path);
+	}
+
+	async function startRemoveWorktree(path: string) {
+		try {
+			await actions.removeWorktree(repoId!, path, false);
+		} catch {
+			// Dirty worktree — escalate to an armed force-confirm, same shape as branch delete (§4.6).
+			clearTimeout(armTimer);
+			removeConfirm = { path, armed: false };
+			armTimer = setTimeout(() => {
+				if (removeConfirm) removeConfirm = { ...removeConfirm, armed: true };
+			}, 400);
+		}
+	}
+
+	function cancelRemoveWorktree() {
+		clearTimeout(armTimer);
+		removeConfirm = null;
+	}
+
+	async function confirmRemoveWorktree() {
+		if (!removeConfirm?.armed || !repoId) return;
+		const path = removeConfirm.path;
+		removeConfirm = null;
+		await actions.removeWorktree(repoId, path, true);
+	}
+
+	const worktreeMenuItems: MenuItem[] = $derived(
+		worktreeMenu && repoId
+			? [
+					{ type: "action", label: "Open", run: () => openWorktreeTab(worktreeMenu!.wt) },
+					{
+						type: "action",
+						label: "Remove…",
+						danger: true,
+						disabledReason: worktreeMenu.wt.isMain ? "Can't remove the main worktree" : undefined,
+						run: () => void startRemoveWorktree(worktreeMenu!.wt.path),
+					},
+					{ type: "action", label: "Prune all", run: () => void actions.pruneWorktrees(repoId!) },
+				]
+			: [],
+	);
 
 	function openStashMenu(selector: string, subject: string, e: MouseEvent) {
 		e.preventDefault();
@@ -290,23 +346,41 @@
 			{/if}
 
 			<!-- WORKTREES -->
-			{#if worktrees.length > 0}
-				<section>
-					<button type="button" class="section-head" onclick={() => toggleSection("worktrees")}>
+			<section>
+				<div class="section-head worktrees-head">
+					<button type="button" class="section-head-btn" onclick={() => toggleSection("worktrees")}>
 						<span class="chev" class:open={sectionOpen("worktrees")}>▸</span>
 						WORKTREES <span class="count">{worktrees.length}</span>
 					</button>
-					{#if sectionOpen("worktrees")}
-						{#each worktrees as wt (wt.path)}
-							<div class="row worktree" title={wt.path}>
-								<span class="presence" aria-hidden="true">🌿</span>
-								<span class="name">{wt.branch ?? wt.head.slice(0, 7)}</span>
-								{#if wt.isMain}<span class="tagpill">main</span>{/if}
-							</div>
-						{/each}
-					{/if}
-				</section>
-			{/if}
+					<button
+						type="button"
+						class="add-worktree"
+						title="Create a worktree"
+						aria-label="Create a worktree"
+						onclick={() => worktreeDialog.open(currentBranch ?? "HEAD")}
+					>
+						＋
+					</button>
+				</div>
+				{#if sectionOpen("worktrees")}
+					{#each worktrees as wt (wt.path)}
+						{@const isOpenTab = repos.tabs.some((t) => t.path === wt.path)}
+						<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+						<div
+							class="row worktree"
+							title={wt.path}
+							onclick={() => openWorktreeTab(wt)}
+							oncontextmenu={(e) => openWorktreeMenu(wt, e)}
+						>
+							<span class="status-dot" class:open-tab={isOpenTab} aria-hidden="true"></span>
+							<span class="name">{wt.branch ?? wt.head.slice(0, 7)}</span>
+							{#if wt.isMain}<span class="tagpill">main</span>{/if}
+							{#if wt.locked}<span class="presence" title="Locked">🔒</span>{/if}
+						</div>
+					{/each}
+					{#if worktrees.length === 0}<p class="empty">No linked worktrees</p>{/if}
+				{/if}
+			</section>
 		</div>
 	{/if}
 </aside>
@@ -337,6 +411,32 @@
 
 {#if tagMenu}
 	<ContextMenu items={tagMenuItems} x={tagMenu.x} y={tagMenu.y} onDismiss={() => (tagMenu = null)} ariaLabel="Tag actions" />
+{/if}
+
+{#if worktreeMenu}
+	<ContextMenu
+		items={worktreeMenuItems}
+		x={worktreeMenu.x}
+		y={worktreeMenu.y}
+		onDismiss={() => (worktreeMenu = null)}
+		ariaLabel="Worktree actions"
+	/>
+{/if}
+
+{#if removeConfirm}
+	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+	<div class="scrim" onclick={cancelRemoveWorktree}></div>
+	<div class="remove-confirm" role="dialog" aria-modal="true" aria-label="Remove worktree">
+		<p class="confirm-text">
+			<code>{removeConfirm.path}</code> has uncommitted or untracked changes. Remove it anyway?
+		</p>
+		<div class="confirm-actions">
+			<button type="button" onclick={cancelRemoveWorktree}>Cancel</button>
+			<button type="button" class="danger-solid" disabled={!removeConfirm.armed} onclick={confirmRemoveWorktree}>
+				{removeConfirm.armed ? "Remove worktree" : "Hold…"}
+			</button>
+		</div>
+	</div>
 {/if}
 
 <style>
@@ -464,6 +564,123 @@
 	.count {
 		color: var(--text-faint);
 		font-weight: 600;
+	}
+
+	.worktrees-head {
+		display: flex;
+		align-items: center;
+		padding-right: var(--space-2);
+	}
+
+	.section-head-btn {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		flex: 1;
+		min-width: 0;
+		padding: var(--space-2) 0 2px var(--space-3);
+		border: none;
+		background: none;
+		color: var(--text-muted);
+		font: inherit;
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		cursor: pointer;
+	}
+
+	.add-worktree {
+		flex-shrink: 0;
+		width: 18px;
+		height: 18px;
+		border: none;
+		border-radius: var(--radius-control);
+		background: none;
+		color: var(--text-muted);
+		font-size: 12px;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.add-worktree:hover {
+		background: var(--raised);
+		color: var(--text);
+	}
+
+	.status-dot {
+		width: 6px;
+		height: 6px;
+		flex-shrink: 0;
+		border-radius: var(--radius-pill);
+		background: var(--text-faint);
+	}
+
+	.status-dot.open-tab {
+		background: var(--accent);
+	}
+
+	.scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 90;
+	}
+
+	.remove-confirm {
+		position: fixed;
+		z-index: 91;
+		left: 50%;
+		top: 50%;
+		transform: translate(-50%, -50%);
+		width: 320px;
+		padding: var(--space-3);
+		background: var(--overlay);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-card);
+		box-shadow: 0 16px 48px rgb(0 0 0 / 35%);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.confirm-text {
+		margin: 0;
+		font-size: 12px;
+		color: var(--text);
+	}
+
+	.confirm-text code {
+		font-family: var(--font-mono);
+		word-break: break-all;
+	}
+
+	.confirm-actions {
+		display: flex;
+		gap: var(--space-1);
+	}
+
+	.confirm-actions button {
+		flex: 1;
+		justify-content: center;
+		padding: var(--space-2);
+		border-radius: var(--radius-control);
+		border: 1px solid var(--border);
+		background: var(--raised);
+		color: var(--text);
+		font: inherit;
+		font-size: 12px;
+		cursor: pointer;
+	}
+
+	.confirm-actions .danger-solid {
+		background: var(--danger);
+		border-color: var(--danger);
+		color: #fff;
+		font-weight: 600;
+	}
+
+	.confirm-actions .danger-solid:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 
 	.row {

@@ -625,6 +625,49 @@ export async function createPatchFromFile(
 	}
 }
 
+// --- worktrees (DESIGN_SPEC.md §5, ARCHITECTURE.md §7.1) ---
+
+export async function createWorktree(
+	repoId: string,
+	path: string,
+	startRef: string,
+	newBranch: string | null,
+): Promise<boolean> {
+	try {
+		await ipc.createWorktree(repoId, path, startRef, newBranch);
+		toasts.push({ message: `Created worktree at \`${path}\``, tone: "success", icon: "check" });
+		return true;
+	} catch (e) {
+		const { userMessage, raw } = asAppError(e);
+		toasts.pushError(userMessage, raw);
+		return false;
+	}
+}
+
+/** Removes a linked worktree. Callers try `force: false` first (git's own dirty-check guard);
+ * on failure they show an armed "Remove anyway" and retry with `force: true`. Rethrows so the
+ * caller can tell the two cases apart, matching `deleteBranch`'s unmerged-guard pattern. */
+export async function removeWorktree(repoId: string, path: string, force: boolean): Promise<void> {
+	try {
+		await ipc.removeWorktree(repoId, path, force);
+		toasts.push({ message: "Removed worktree", tone: "success", icon: "check" });
+	} catch (e) {
+		if (!force) throw e;
+		const { userMessage, raw } = asAppError(e);
+		toasts.pushError(userMessage, raw);
+	}
+}
+
+export async function pruneWorktrees(repoId: string): Promise<void> {
+	try {
+		await ipc.pruneWorktrees(repoId);
+		toasts.push({ message: "Pruned stale worktrees", tone: "success", icon: "check" });
+	} catch (e) {
+		const { userMessage, raw } = asAppError(e);
+		toasts.pushError(userMessage, raw);
+	}
+}
+
 export async function fastForward(
 	repoId: string,
 	branch: string,

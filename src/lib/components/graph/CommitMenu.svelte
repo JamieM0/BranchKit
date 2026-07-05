@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ContextMenu, { type MenuItem } from "$lib/components/shell/ContextMenu.svelte";
 	import * as actions from "$lib/actions";
+	import { worktreeDialog } from "$lib/stores/worktreeDialog.svelte";
 
 	/** Commit row right-click menu — GITKRAKEN_WORKFLOWS.md §3.1, DESIGN_SPEC.md §15.30. Everything
 	 * that doesn't need a follow-up prompt runs straight off the menu; Reset Hard gets the
@@ -104,6 +105,8 @@
 		{ type: "action", label: "Create patch from commit", run: () => run(() => actions.createPatchFromCommit(repoId, sha)) },
 		{ type: "separator" },
 		{ type: "action", label: "Compare commit against working directory", run: () => run(() => onCompareWorking(sha)) },
+		{ type: "separator" },
+		{ type: "action", label: "Create worktree from this commit…", run: () => run(() => worktreeDialog.open(sha)) },
 		{ type: "separator" },
 		{
 			type: "action",

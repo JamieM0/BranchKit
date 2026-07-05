@@ -4,6 +4,7 @@
 	import { statusGlyph } from "$lib/status/glyphs";
 	import { fileName, parentPath } from "$lib/status/sections";
 	import * as actions from "$lib/actions";
+	import { fileInspector } from "$lib/stores/fileInspector.svelte";
 	import ContextMenu, { type MenuItem } from "$lib/components/shell/ContextMenu.svelte";
 
 	/** Shared file row — DESIGN_SPEC.md §6.1. Reused by the working-directory sections, the
@@ -90,18 +91,8 @@
 			});
 		}
 		items.push({ type: "separator" });
-		items.push({
-			type: "action",
-			label: "File History",
-			disabledReason: "Lands with file history (prompt 14)",
-			run: () => {},
-		});
-		items.push({
-			type: "action",
-			label: "File Blame",
-			disabledReason: "Lands with blame (prompt 14)",
-			run: () => {},
-		});
+		items.push({ type: "action", label: "File History", run: () => fileInspector.open(path, "history") });
+		items.push({ type: "action", label: "File Blame", run: () => fileInspector.open(path, "blame") });
 		items.push({ type: "separator" });
 		if (repoRoot) {
 			items.push({ type: "action", label: "Open file", run: () => void openPath(`${repoRoot}/${path}`) });

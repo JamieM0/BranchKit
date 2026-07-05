@@ -298,3 +298,32 @@ export interface FileConflictRegions {
 	theirsDeleted: boolean;
 	regions: FileRegion[];
 }
+
+// --- git/history.rs ---------------------------------------------------------
+
+/** One row of a file's `--follow` history — DESIGN_SPEC.md §6.3. */
+export interface FileHistoryEntry {
+	sha: string;
+	authorName: string;
+	authorEmail: string;
+	/** Unix seconds (author date). */
+	authorTime: number;
+	subject: string;
+}
+
+// --- git/blame.rs ---------------------------------------------------------
+
+/** A contiguous run of lines attributed to the same commit — the blame gutter's unit
+ * (DESIGN_SPEC.md §6.3). Uncommitted lines carry git's all-zero sha and author "Not Committed
+ * Yet". */
+export interface BlameRun {
+	sha: string;
+	authorName: string;
+	authorEmail: string;
+	/** Unix seconds (author date). */
+	authorTime: number;
+	summary: string;
+	/** 1-based line number of the run's first line in the current file. */
+	startLine: number;
+	lines: string[];
+}

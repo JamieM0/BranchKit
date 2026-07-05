@@ -3,6 +3,7 @@
 	import * as ipc from "$lib/ipc";
 	import { toasts } from "$lib/stores/toasts.svelte";
 	import type { DiffTarget } from "$lib/stores/diffView.svelte";
+	import { fileInspector } from "$lib/stores/fileInspector.svelte";
 	import type { DiffLine, FileDiff, Hunk } from "$lib/types";
 	import { languageForPath } from "$lib/diff/language";
 	import { escapeHtml, highlightLines } from "$lib/diff/highlight";
@@ -323,8 +324,8 @@
 		</label>
 		{#if ignoreWhitespace}<span class="ws-indicator" title="Whitespace-only changes are hidden">⌗ whitespace hidden</span>{/if}
 		<div class="stub-actions">
-			<button type="button" disabled title="Lands with file history (prompt 14)">File History</button>
-			<button type="button" disabled title="Lands with blame (prompt 14)">Blame</button>
+			<button type="button" onclick={() => fileInspector.open(target.path, "history")}>File History</button>
+			<button type="button" onclick={() => fileInspector.open(target.path, "blame")}>Blame</button>
 			<button type="button" disabled title="Lands with the external-open integration (prompt 14)">Open file</button>
 		</div>
 	</div>
@@ -751,10 +752,19 @@
 		border: 1px solid var(--border);
 		border-radius: var(--radius-control);
 		background: var(--raised);
-		color: var(--text-faint);
+		color: var(--text);
 		font: inherit;
 		font-size: 11px;
 		padding: 2px 8px;
+		cursor: pointer;
+	}
+
+	.stub-actions button:hover:not(:disabled) {
+		background: var(--overlay);
+	}
+
+	.stub-actions button:disabled {
+		color: var(--text-faint);
 		cursor: not-allowed;
 	}
 
