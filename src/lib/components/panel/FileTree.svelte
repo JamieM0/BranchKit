@@ -13,12 +13,14 @@
 		actionFor,
 		onFileClick,
 		onFileAction,
+		onFileDiscard,
 	}: {
 		nodes: TreeNode[];
 		selectedPath?: string | null;
 		actionFor: (path: string) => "Stage" | "Unstage";
 		onFileClick: (path: string) => void;
 		onFileAction: (path: string) => void;
+		onFileDiscard?: (path: string) => void;
 	} = $props();
 
 	let collapsed = $state<Record<string, boolean>>({});
@@ -72,6 +74,7 @@
 					actionLabel={actionFor(node.row.path)}
 					onClick={() => onFileClick(node.row.path)}
 					onAction={() => onFileAction(node.row.path)}
+					onDiscard={onFileDiscard ? () => onFileDiscard(node.row.path) : undefined}
 				/>
 			</div>
 		{/if}

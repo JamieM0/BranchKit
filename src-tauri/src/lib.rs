@@ -19,6 +19,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
+        .setup(|app| {
+            // Best-effort discard-trash purge (ARCHITECTURE.md §7.3) — never blocks startup.
+            git::discard::purge_old_entries(&app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             repo::open_repo,
@@ -51,6 +56,13 @@ pub fn run() {
             git::stage::unstage_file,
             git::stage::stage_all,
             git::stage::unstage_all,
+            git::stage::stage_lines,
+            git::stage::unstage_lines,
+            git::discard::discard_file,
+            git::discard::discard_hunk,
+            git::discard::discard_all,
+            git::discard::list_discarded,
+            git::discard::restore_discarded,
             git::diff::get_diff_worktree,
             git::diff::get_diff_staged,
             git::diff::get_diff_commit,

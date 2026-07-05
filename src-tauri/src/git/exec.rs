@@ -235,6 +235,83 @@ pub async fn git(repo: &Path, args: &[&str], opts: GitOpts) -> Result<GitOutput,
     }
 }
 
+/// Like [`git`], but writes `input` to the child's stdin and closes it — the hunk/line staging
+/// patch-application technique (ARCHITECTURE.md §6.3) feeds a constructed patch to
+/// `git apply --cached -` this way.
+pub async fn git_with_stdin(
+    repo: &Path,
+    args: &[&str],
+    opts: GitOpts,
+    input: &[u8],
+) -> Result<GitOutput, GitError> {
+    let cmd_summary = format!("git {}", args.join(" "));
+    let mut command = build_command(repo, args);
+    command.stdin(Stdio::piped());
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| GitError::spawn(&cmd_summary, e))?;
+
+    let mut stdin_pipe = child.stdin.take().expect("stdin was piped");
+    let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
+    let mut stderr_pipe = child.stderr.take().expect("stderr was piped");
+
+    let input = input.to_vec();
+    let stdin_task = tokio::spawn(async move {
+        use tokio::io::AsyncWriteExt;
+        // Best-effort: if the child exits early (e.g. rejects the patch immediately) the write
+        // may fail with a broken pipe — that's fine, `child.wait()` below still gets the real
+        // exit status and stderr.
+        let _ = stdin_pipe.write_all(&input).await;
+        drop(stdin_pipe);
+    });
+    let stdout_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        stdout_pipe.read_to_end(&mut buf).await.map(|_| buf)
+    });
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        stderr_pipe.read_to_end(&mut buf).await.map(|_| buf)
+    });
+
+    let run = async {
+        let status = child.wait().await?;
+        let _ = stdin_task.await;
+        let stdout = stdout_task
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))??;
+        let stderr = stderr_task
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))??;
+        Ok::<_, std::io::Error>((status, stdout, stderr))
+    };
+
+    match tokio::time::timeout(opts.timeout, run).await {
+        Ok(Ok((status, stdout, stderr_bytes))) => {
+            let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+            let code = status.code().unwrap_or(-1);
+            if status.success() {
+                Ok(GitOutput {
+                    stdout,
+                    stderr,
+                    code,
+                })
+            } else {
+                Err(GitError::exited(code, stderr, cmd_summary))
+            }
+        }
+        Ok(Err(e)) => Err(GitError::spawn(&cmd_summary, e)),
+        Err(_elapsed) => {
+            #[cfg(unix)]
+            if let Some(pid) = child.id() {
+                kill_process_group(pid);
+            }
+            let _ = child.start_kill();
+            Err(GitError::timeout(cmd_summary))
+        }
+    }
+}
+
 /// A parsed `N%` progress line from a network op's stderr — ARCHITECTURE.md §3.1.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -479,6 +556,57 @@ mod tests {
     #[test]
     fn ignores_non_progress_lines() {
         assert!(parse_progress_line("fatal: repository not found").is_none());
+    }
+
+    #[tokio::test]
+    async fn git_with_stdin_feeds_patch_to_apply() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        git(
+            dir.path(),
+            &["init", "--initial-branch=main", "-q"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
+        std::fs::write(dir.path().join("f.txt"), "line1\nline2\nline3\n").unwrap();
+        git(dir.path(), &["add", "-A"], GitOpts::default())
+            .await
+            .unwrap();
+        git(
+            dir.path(),
+            &["-c", "commit.gpgsign=false", "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
+
+        std::fs::write(dir.path().join("f.txt"), "line1\nline2 changed\nline3\n").unwrap();
+        let diff = git(
+            dir.path(),
+            &["diff", "--no-color", "-U3", "--", "f.txt"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
+
+        git_with_stdin(
+            dir.path(),
+            &["apply", "--cached", "--recount", "--whitespace=nowarn", "-"],
+            GitOpts::default(),
+            &diff.stdout,
+        )
+        .await
+        .expect("apply should succeed");
+
+        let staged = git(
+            dir.path(),
+            &["diff", "--no-color", "--cached", "--", "f.txt"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
+        let text = String::from_utf8_lossy(&staged.stdout);
+        assert!(text.contains("line2 changed"));
     }
 
     #[tokio::test]

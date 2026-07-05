@@ -15,6 +15,7 @@
 		actionLabel = null,
 		onClick,
 		onAction,
+		onDiscard,
 	}: {
 		path: string;
 		origPath?: string | null;
@@ -24,6 +25,9 @@
 		actionLabel?: "Stage" | "Unstage" | null;
 		onClick?: () => void;
 		onAction?: () => void;
+		/** Discard this file's unstaged changes — only offered from the Unstaged section
+		 * (DESIGN_SPEC.md §6.1/§7.4); omit the prop to hide the button entirely. */
+		onDiscard?: () => void;
 	} = $props();
 
 	const glyph = $derived(statusGlyph(status));
@@ -69,6 +73,20 @@
 				}}
 			>
 				{actionLabel}
+			</button>
+		{/if}
+		{#if onDiscard}
+			<button
+				type="button"
+				class="action discard"
+				title="Discard changes to this file — recoverable from Recently Discarded"
+				aria-label="Discard {name}"
+				onclick={(e) => {
+					e.stopPropagation();
+					onDiscard?.();
+				}}
+			>
+				🗑
 			</button>
 		{/if}
 		<button
@@ -183,6 +201,10 @@
 
 	.action:hover {
 		background: var(--overlay);
+	}
+
+	.action.discard {
+		color: var(--danger);
 	}
 
 	.overflow {

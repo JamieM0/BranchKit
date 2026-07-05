@@ -3,6 +3,7 @@
 
 pub mod blob;
 pub mod diff;
+pub mod discard;
 pub mod exec;
 pub mod identity;
 pub mod log;

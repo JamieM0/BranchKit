@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { graph } from "$lib/stores/graph.svelte";
 	import * as ipc from "$lib/ipc";
+	import { toasts } from "$lib/stores/toasts.svelte";
 	import type { DiffTarget } from "$lib/stores/diffView.svelte";
-	import type { FileDiff, Hunk } from "$lib/types";
+	import type { DiffLine, FileDiff, Hunk } from "$lib/types";
 	import { languageForPath } from "$lib/diff/language";
 	import { escapeHtml, highlightLines } from "$lib/diff/highlight";
 	import { isLinePair, pairChangedLines, type RenderLine } from "$lib/diff/pairLines";
@@ -38,6 +39,124 @@
 	let afterImage = $state<string | null>(null);
 	let beforeDims = $state<{ w: number; h: number } | null>(null);
 	let afterDims = $state<{ w: number; h: number } | null>(null);
+
+	/** Gutter line staging (DESIGN_SPEC.md §6.2/§15.11) — only meaningful for the two live working
+	 * copies, not a read-only commit/compare diff. `staged` view stages in reverse (unstage). */
+	const isWorkingCopy = $derived(
+		target.source.kind === "workingTree" || target.source.kind === "staged",
+	);
+	const isStagedView = $derived(target.source.kind === "staged");
+	/** The backend always diffs without `-w`, so gutter line indices only line up with a diff
+	 * fetched the same way — disable the interactive gutter while whitespace is hidden rather than
+	 * risk staging the wrong lines. */
+	const gutterEnabled = $derived(isWorkingCopy && !ignoreWhitespace);
+	let busy = $state(false);
+	let dragState = $state<{ hunkIndex: number; hunk: Hunk; anchor: number; current: number } | null>(
+		null,
+	);
+
+	function lineIndicesInRange(hunk: Hunk, from: number, to: number): number[] {
+		const lo = Math.min(from, to);
+		const hi = Math.max(from, to);
+		const indices: number[] = [];
+		for (let i = lo; i <= hi; i += 1) {
+			if (hunk.lines[i] && hunk.lines[i].kind !== "context") indices.push(i);
+		}
+		return indices;
+	}
+
+	function allChangeIndices(hunk: Hunk): number[] {
+		return hunk.lines.reduce<number[]>((acc, l, i) => {
+			if (l.kind !== "context") acc.push(i);
+			return acc;
+		}, []);
+	}
+
+	function asAppError(e: unknown): { userMessage: string; raw: string } {
+		if (e && typeof e === "object" && "userMessage" in e) {
+			const o = e as Record<string, unknown>;
+			return { userMessage: String(o.userMessage), raw: String(o.raw ?? "") };
+		}
+		return { userMessage: e instanceof Error ? e.message : String(e), raw: String(e) };
+	}
+
+	async function applyLineSelection(hunkIndex: number, indices: number[]) {
+		const id = repoId;
+		if (!id || indices.length === 0 || busy) return;
+		busy = true;
+		try {
+			if (isStagedView) {
+				await ipc.unstageLines(id, target.path, hunkIndex, indices);
+			} else {
+				await ipc.stageLines(id, target.path, hunkIndex, indices);
+			}
+			await loadDiff();
+		} catch (e) {
+			const { userMessage, raw } = asAppError(e);
+			toasts.pushError(userMessage, raw);
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function stageOrUnstageHunk(hunkIndex: number, hunk: Hunk) {
+		await applyLineSelection(hunkIndex, allChangeIndices(hunk));
+	}
+
+	async function discardHunk(hunkIndex: number) {
+		const id = repoId;
+		if (!id || busy) return;
+		busy = true;
+		try {
+			await ipc.discardHunk(id, target.path, hunkIndex);
+			await loadDiff();
+			toasts.push({
+				message: "Discarded a change",
+				tone: "warn",
+				destructive: true,
+				action: {
+					label: "Undo",
+					run: async () => {
+						// A fresh call, not the id captured above — discardHunk's own trash write
+						// created a new entry each time, and the toast always refers to the latest.
+						const entries = await ipc.listDiscarded(id);
+						const latest = entries[0];
+						if (latest) await ipc.restoreDiscarded(id, latest.id);
+						await loadDiff();
+					},
+				},
+			});
+		} catch (e) {
+			const { userMessage, raw } = asAppError(e);
+			toasts.pushError(userMessage, raw);
+		} finally {
+			busy = false;
+		}
+	}
+
+	function gutterMouseDown(hunkIndex: number, hunk: Hunk, lineIdx: number, line: DiffLine) {
+		if (!gutterEnabled || busy || line.kind === "context") return;
+		dragState = { hunkIndex, hunk, anchor: lineIdx, current: lineIdx };
+	}
+
+	function gutterMouseEnter(hunkIndex: number, lineIdx: number) {
+		if (!dragState || dragState.hunkIndex !== hunkIndex) return;
+		dragState = { ...dragState, current: lineIdx };
+	}
+
+	function commitDrag() {
+		if (!dragState) return;
+		const { hunkIndex, hunk, anchor, current } = dragState;
+		dragState = null;
+		void applyLineSelection(hunkIndex, lineIndicesInRange(hunk, anchor, current));
+	}
+
+	function isDragging(hunkIndex: number, lineIdx: number): boolean {
+		if (!dragState || dragState.hunkIndex !== hunkIndex) return false;
+		const lo = Math.min(dragState.anchor, dragState.current);
+		const hi = Math.max(dragState.anchor, dragState.current);
+		return lineIdx >= lo && lineIdx <= hi;
+	}
 
 	function sourceLabel(): string {
 		switch (target.source.kind) {
@@ -145,6 +264,10 @@
 		hunk: Hunk;
 		groups: RenderLine[];
 		html: Map<object, string>;
+		/** Maps a `DiffLine` (by reference — hunk.lines are stable objects for the diff's
+		 * lifetime) back to its index in `hunk.lines`, which is exactly the index the backend's
+		 * `stage_lines`/`unstage_lines`/`discard_hunk` expect (ARCHITECTURE.md §6.3). */
+		lineIndex: Map<object, number>;
 		large: boolean;
 	}
 
@@ -157,11 +280,17 @@
 				language,
 			);
 			const html = new Map<object, string>();
-			hunk.lines.forEach((line, i) => html.set(line, highlighted[i]));
-			return { hunk, groups, html, large: hunk.lines.length > HUNK_COLLAPSE_THRESHOLD };
+			const lineIndex = new Map<object, number>();
+			hunk.lines.forEach((line, i) => {
+				html.set(line, highlighted[i]);
+				lineIndex.set(line, i);
+			});
+			return { hunk, groups, html, lineIndex, large: hunk.lines.length > HUNK_COLLAPSE_THRESHOLD };
 		});
 	});
 </script>
+
+<svelte:window onmouseup={commitDrag} />
 
 <div class="viewer">
 	<div class="breadcrumb">
@@ -254,8 +383,28 @@
 					<div class="hunk-header">
 						<span class="hunk-header-text">{prepared.hunk.header}</span>
 						<div class="hunk-actions">
-							<button type="button" disabled title="Hunk staging lands with the Keep Panel work (ARCHITECTURE §6.3)">Stage hunk</button>
-							<button type="button" disabled title="Hunk staging lands with the Keep Panel work (ARCHITECTURE §6.3)">Discard hunk…</button>
+							{#if isWorkingCopy}
+								<button
+									type="button"
+									disabled={!gutterEnabled || busy}
+									title={gutterEnabled ? "" : "Disabled while whitespace is hidden — turn that off to stage/discard by hunk"}
+									onclick={() => void stageOrUnstageHunk(hi, prepared.hunk)}
+								>
+									{isStagedView ? "Unstage hunk" : "Stage hunk"}
+								</button>
+								{#if !isStagedView}
+									<button
+										type="button"
+										disabled={!gutterEnabled || busy}
+										title={gutterEnabled ? "" : "Disabled while whitespace is hidden — turn that off to stage/discard by hunk"}
+										onclick={() => void discardHunk(hi)}
+									>
+										Discard hunk…
+									</button>
+								{/if}
+							{:else}
+								<button type="button" disabled title="Only the working tree and staged diffs can be modified">Stage hunk</button>
+							{/if}
 						</div>
 					</div>
 					{#if prepared.large && !expandedHunks.has(hi)}
@@ -269,7 +418,16 @@
 									{#if isLinePair(group)}
 										{@const wd = group.del && group.add ? wordDiff(group.del.text, group.add.text) : null}
 										{#if group.del}
-											<tr class="del">
+											{@const idx = prepared.lineIndex.get(group.del)}
+											<tr class="del" class:staged-pending={idx !== undefined && isDragging(hi, idx)}>
+												<td
+													class="gutter"
+													class:interactive={gutterEnabled}
+													onmousedown={() => idx !== undefined && gutterMouseDown(hi, prepared.hunk, idx, group.del!)}
+													onmouseenter={() => idx !== undefined && gutterMouseEnter(hi, idx)}
+												>
+													{#if gutterEnabled}<span class="check" aria-hidden="true"></span>{/if}
+												</td>
 												<td class="lineno">{group.del.oldNo}</td>
 												<td class="lineno"></td>
 												<td class="marker">−</td>
@@ -283,7 +441,16 @@
 											</tr>
 										{/if}
 										{#if group.add}
-											<tr class="add">
+											{@const idx = prepared.lineIndex.get(group.add)}
+											<tr class="add" class:staged-pending={idx !== undefined && isDragging(hi, idx)}>
+												<td
+													class="gutter"
+													class:interactive={gutterEnabled}
+													onmousedown={() => idx !== undefined && gutterMouseDown(hi, prepared.hunk, idx, group.add!)}
+													onmouseenter={() => idx !== undefined && gutterMouseEnter(hi, idx)}
+												>
+													{#if gutterEnabled}<span class="check" aria-hidden="true"></span>{/if}
+												</td>
 												<td class="lineno"></td>
 												<td class="lineno">{group.add.newNo}</td>
 												<td class="marker">＋</td>
@@ -298,6 +465,7 @@
 										{/if}
 									{:else if group.kind === "context"}
 										<tr class="context">
+											<td class="gutter"></td>
 											<td class="lineno">{group.oldNo}</td>
 											<td class="lineno">{group.newNo}</td>
 											<td class="marker"></td>
@@ -305,7 +473,16 @@
 											<td class="content">{@html prepared.html.get(group) ?? escapeHtml(group.text)}</td>
 										</tr>
 									{:else}
-										<tr class={group.kind}>
+										{@const idx = prepared.lineIndex.get(group)}
+										<tr class={group.kind} class:staged-pending={idx !== undefined && isDragging(hi, idx)}>
+											<td
+												class="gutter"
+												class:interactive={gutterEnabled}
+												onmousedown={() => idx !== undefined && gutterMouseDown(hi, prepared.hunk, idx, group)}
+												onmouseenter={() => idx !== undefined && gutterMouseEnter(hi, idx)}
+											>
+												{#if gutterEnabled}<span class="check" aria-hidden="true"></span>{/if}
+											</td>
 											<td class="lineno">{group.oldNo ?? ""}</td>
 											<td class="lineno">{group.newNo ?? ""}</td>
 											<td class="marker">{group.kind === "add" ? "＋" : "−"}</td>
@@ -325,8 +502,28 @@
 					<div class="hunk-header">
 						<span class="hunk-header-text">{prepared.hunk.header}</span>
 						<div class="hunk-actions">
-							<button type="button" disabled title="Hunk staging lands with the Keep Panel work (ARCHITECTURE §6.3)">Stage hunk</button>
-							<button type="button" disabled title="Hunk staging lands with the Keep Panel work (ARCHITECTURE §6.3)">Discard hunk…</button>
+							{#if isWorkingCopy}
+								<button
+									type="button"
+									disabled={!gutterEnabled || busy}
+									title={gutterEnabled ? "" : "Disabled while whitespace is hidden — turn that off to stage/discard by hunk"}
+									onclick={() => void stageOrUnstageHunk(hi, prepared.hunk)}
+								>
+									{isStagedView ? "Unstage hunk" : "Stage hunk"}
+								</button>
+								{#if !isStagedView}
+									<button
+										type="button"
+										disabled={!gutterEnabled || busy}
+										title={gutterEnabled ? "" : "Disabled while whitespace is hidden — turn that off to stage/discard by hunk"}
+										onclick={() => void discardHunk(hi)}
+									>
+										Discard hunk…
+									</button>
+								{/if}
+							{:else}
+								<button type="button" disabled title="Only the working tree and staged diffs can be modified">Stage hunk</button>
+							{/if}
 						</div>
 					</div>
 					{#if prepared.large && !expandedHunks.has(hi)}
@@ -338,8 +535,21 @@
 							<tbody>
 								{#each prepared.groups as group, gi (gi)}
 									{@const wd = isLinePair(group) && group.del && group.add ? wordDiff(group.del.text, group.add.text) : null}
-									<tr>
+									{@const delIdx = isLinePair(group) ? (group.del ? prepared.lineIndex.get(group.del) : undefined) : (group.kind === "del" ? prepared.lineIndex.get(group) : undefined)}
+									{@const addIdx = isLinePair(group) ? (group.add ? prepared.lineIndex.get(group.add) : undefined) : (group.kind === "add" ? prepared.lineIndex.get(group) : undefined)}
+									<tr
+										class:staged-pending={(delIdx !== undefined && isDragging(hi, delIdx)) ||
+											(addIdx !== undefined && isDragging(hi, addIdx))}
+									>
 										{#if isLinePair(group)}
+											<td
+												class="gutter"
+												class:interactive={gutterEnabled && !!group.del}
+												onmousedown={() => group.del && delIdx !== undefined && gutterMouseDown(hi, prepared.hunk, delIdx, group.del)}
+												onmouseenter={() => delIdx !== undefined && gutterMouseEnter(hi, delIdx)}
+											>
+												{#if gutterEnabled && group.del}<span class="check" aria-hidden="true"></span>{/if}
+											</td>
 											<td class="lineno">{group.del?.oldNo ?? ""}</td>
 											<td class="marker del">{group.del ? "−" : ""}</td>
 											<td class="content del">
@@ -350,6 +560,14 @@
 														{group.del.text}
 													{/if}
 												{/if}
+											</td>
+											<td
+												class="gutter"
+												class:interactive={gutterEnabled && !!group.add}
+												onmousedown={() => group.add && addIdx !== undefined && gutterMouseDown(hi, prepared.hunk, addIdx, group.add)}
+												onmouseenter={() => addIdx !== undefined && gutterMouseEnter(hi, addIdx)}
+											>
+												{#if gutterEnabled && group.add}<span class="check" aria-hidden="true"></span>{/if}
 											</td>
 											<td class="lineno">{group.add?.newNo ?? ""}</td>
 											<td class="marker add">{group.add ? "＋" : ""}</td>
@@ -363,26 +581,46 @@
 												{/if}
 											</td>
 										{:else if group.kind === "context"}
+											<td class="gutter"></td>
 											<td class="lineno">{group.oldNo}</td>
 											<td class="marker"></td>
 											<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 											<td class="content">{@html prepared.html.get(group) ?? escapeHtml(group.text)}</td>
+											<td class="gutter"></td>
 											<td class="lineno">{group.newNo}</td>
 											<td class="marker"></td>
 											<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 											<td class="content">{@html prepared.html.get(group) ?? escapeHtml(group.text)}</td>
 										{:else if group.kind === "del"}
+											<td
+												class="gutter"
+												class:interactive={gutterEnabled}
+												onmousedown={() => delIdx !== undefined && gutterMouseDown(hi, prepared.hunk, delIdx, group)}
+												onmouseenter={() => delIdx !== undefined && gutterMouseEnter(hi, delIdx)}
+											>
+												{#if gutterEnabled}<span class="check" aria-hidden="true"></span>{/if}
+											</td>
 											<td class="lineno">{group.oldNo}</td>
 											<td class="marker del">−</td>
 											<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 											<td class="content del">{@html prepared.html.get(group) ?? escapeHtml(group.text)}</td>
+											<td class="gutter"></td>
 											<td class="lineno"></td>
 											<td class="marker"></td>
 											<td class="content"></td>
 										{:else}
+											<td class="gutter"></td>
 											<td class="lineno"></td>
 											<td class="marker"></td>
 											<td class="content"></td>
+											<td
+												class="gutter"
+												class:interactive={gutterEnabled}
+												onmousedown={() => addIdx !== undefined && gutterMouseDown(hi, prepared.hunk, addIdx, group)}
+												onmouseenter={() => addIdx !== undefined && gutterMouseEnter(hi, addIdx)}
+											>
+												{#if gutterEnabled}<span class="check" aria-hidden="true"></span>{/if}
+											</td>
 											<td class="lineno">{group.newNo}</td>
 											<td class="marker add">＋</td>
 											<!-- eslint-disable-next-line svelte/no-at-html-tags -->
@@ -628,8 +866,50 @@
 		border-radius: 2px;
 	}
 
-	table.split td.lineno:nth-of-type(4) {
+	table.split td:nth-of-type(5) {
 		border-left: 1px solid var(--border-soft);
+	}
+
+	.gutter {
+		width: 16px;
+		padding: 0;
+		text-align: center;
+		user-select: none;
+		cursor: default;
+	}
+
+	.gutter.interactive {
+		cursor: pointer;
+	}
+
+	.gutter.interactive .check {
+		display: inline-block;
+		width: 9px;
+		height: 9px;
+		border: 1.5px solid var(--text-faint);
+		border-radius: 2px;
+		opacity: 0;
+		transition: opacity var(--motion-hover), border-color var(--motion-hover);
+	}
+
+	tr:hover > .gutter.interactive .check {
+		opacity: 1;
+	}
+
+	.gutter.interactive:hover .check {
+		border-color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 20%, transparent);
+	}
+
+	tr.staged-pending {
+		outline: 1px solid var(--accent);
+		outline-offset: -1px;
+	}
+
+	tr.staged-pending .gutter .check {
+		opacity: 1;
+		background: var(--accent);
+		border-color: var(--accent);
 	}
 
 	.binary {

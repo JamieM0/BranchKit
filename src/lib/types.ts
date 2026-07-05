@@ -220,3 +220,14 @@ export interface ChangedFile {
 	origPath: string | null;
 	status: ChangedFileStatus;
 }
+
+// --- git/discard.rs ---------------------------------------------------------
+
+/** One entry in the repo menu's "Recently discarded" list — DESIGN_SPEC.md §7.4/§12. */
+export interface DiscardedEntry {
+	id: string;
+	description: string;
+	files: string[];
+	/** Unix milliseconds. */
+	createdAtMs: number;
+}

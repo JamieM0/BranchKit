@@ -5,6 +5,7 @@ import type {
   ChangedFile,
   ChangeKind,
   CommitMeta,
+  DiscardedEntry,
   Divergence,
   FileDiff,
   GitIdentity,
@@ -169,6 +170,50 @@ export async function stageAll(repoId: string): Promise<void> {
 
 export async function unstageAll(repoId: string): Promise<void> {
   return invoke("unstage_all", { repoId });
+}
+
+/** Stages a subset of one hunk's changed lines — pass every changed index in the hunk to stage
+ * the whole hunk (ARCHITECTURE.md §6.3, DESIGN_SPEC.md §6.2/§15.11). `hunkIndex`/`lineIndices`
+ * must come from a diff fetched *without* the whitespace-ignore toggle. */
+export async function stageLines(
+  repoId: string,
+  path: string,
+  hunkIndex: number,
+  lineIndices: number[],
+): Promise<void> {
+  return invoke("stage_lines", { repoId, path, hunkIndex, lineIndices });
+}
+
+/** Same mechanics reversed for the Staged view (DESIGN_SPEC.md §6.2). */
+export async function unstageLines(
+  repoId: string,
+  path: string,
+  hunkIndex: number,
+  lineIndices: number[],
+): Promise<void> {
+  return invoke("unstage_lines", { repoId, path, hunkIndex, lineIndices });
+}
+
+// --- discard safety net (ARCHITECTURE.md §7.3, DESIGN_SPEC.md §7.4) ---
+
+export async function discardFile(repoId: string, path: string): Promise<void> {
+  return invoke("discard_file", { repoId, path });
+}
+
+export async function discardHunk(repoId: string, path: string, hunkIndex: number): Promise<void> {
+  return invoke("discard_hunk", { repoId, path, hunkIndex });
+}
+
+export async function discardAll(repoId: string): Promise<void> {
+  return invoke("discard_all", { repoId });
+}
+
+export async function listDiscarded(repoId: string): Promise<DiscardedEntry[]> {
+  return invoke("list_discarded", { repoId });
+}
+
+export async function restoreDiscarded(repoId: string, entryId: string): Promise<void> {
+  return invoke("restore_discarded", { repoId, entryId });
 }
 
 // --- diffs (ARCHITECTURE.md §6.2) ---

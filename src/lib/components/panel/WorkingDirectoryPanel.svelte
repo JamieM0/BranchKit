@@ -7,6 +7,7 @@
 	import * as ipc from "$lib/ipc";
 	import { stagedRows, unstagedRows, type FileRow as FileRowModel } from "$lib/status/sections";
 	import { buildFileTree } from "$lib/status/tree";
+	import type { DiscardedEntry } from "$lib/types";
 	import FileRow from "./FileRow.svelte";
 	import FileTree from "./FileTree.svelte";
 
@@ -115,6 +116,103 @@
 		}
 	}
 
+	// --- discard safety net (ARCHITECTURE.md §7.3, DESIGN_SPEC.md §7.4/§8/§15.12) ---
+
+	/** After any discard, the toast's **Undo** just restores the *latest* trash entry — each
+	 * discard writes exactly one, so "most recent" always means "the one this toast caused". */
+	async function undoLastDiscard() {
+		if (!repoId) return;
+		const entries = await ipc.listDiscarded(repoId);
+		const latest = entries[0];
+		if (latest) await ipc.restoreDiscarded(repoId, latest.id);
+	}
+
+	async function discardFile(path: string) {
+		if (!repoId) return;
+		try {
+			await ipc.discardFile(repoId, path);
+			toasts.push({
+				message: `Discarded ${path}`,
+				tone: "warn",
+				destructive: true,
+				action: { label: "Undo", run: undoLastDiscard },
+			});
+		} catch (e) {
+			const { userMessage, raw } = asAppError(e);
+			toasts.pushError(userMessage, raw);
+		}
+	}
+
+	/** Discard All's confirm is soft (single click) everywhere else, but per DESIGN_SPEC.md §4.6
+	 * this one destructive action gets a 400ms arm delay instead of a typed-word confirm — the
+	 * button is visible but inert for 400ms after the inline confirm appears. */
+	let confirmingDiscardAll = $state(false);
+	let discardAllArmed = $state(false);
+	let armTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function requestDiscardAll() {
+		confirmingDiscardAll = true;
+		discardAllArmed = false;
+		clearTimeout(armTimer);
+		armTimer = setTimeout(() => {
+			discardAllArmed = true;
+		}, 400);
+	}
+
+	function cancelDiscardAll() {
+		confirmingDiscardAll = false;
+		discardAllArmed = false;
+		clearTimeout(armTimer);
+	}
+
+	async function confirmDiscardAll() {
+		if (!repoId || !discardAllArmed) return;
+		const count = totalChanged;
+		confirmingDiscardAll = false;
+		discardAllArmed = false;
+		try {
+			await ipc.discardAll(repoId);
+			toasts.push({
+				message: `Discarded ${count} file${count === 1 ? "" : "s"}`,
+				tone: "warn",
+				destructive: true,
+				action: { label: "Undo", run: undoLastDiscard },
+			});
+		} catch (e) {
+			const { userMessage, raw } = asAppError(e);
+			toasts.pushError(userMessage, raw);
+		}
+	}
+
+	// --- "Recently discarded" (repo menu, DESIGN_SPEC.md §7.4/§12) ---
+
+	let showRecentlyDiscarded = $state(false);
+	let recentlyDiscarded = $state<DiscardedEntry[]>([]);
+
+	async function toggleRecentlyDiscarded() {
+		showRecentlyDiscarded = !showRecentlyDiscarded;
+		if (showRecentlyDiscarded && repoId) {
+			try {
+				recentlyDiscarded = await ipc.listDiscarded(repoId);
+			} catch (e) {
+				const { userMessage, raw } = asAppError(e);
+				toasts.pushError(userMessage, raw);
+			}
+		}
+	}
+
+	async function restoreEntry(entry: DiscardedEntry) {
+		if (!repoId) return;
+		try {
+			await ipc.restoreDiscarded(repoId, entry.id);
+			recentlyDiscarded = recentlyDiscarded.filter((e) => e.id !== entry.id);
+			toasts.push({ message: `Restored ${entry.description.toLowerCase()}`, tone: "success" });
+		} catch (e) {
+			const { userMessage, raw } = asAppError(e);
+			toasts.pushError(userMessage, raw);
+		}
+	}
+
 	function actionFor(section: Section): "Stage" | "Unstage" {
 		return section === "unstaged" ? "Stage" : "Unstage";
 	}
@@ -146,8 +244,24 @@
 			<strong>{totalChanged}</strong> changes on <code>{branch}</code>
 		</div>
 		<div class="header-actions">
-			<button type="button" class="discard-all" disabled title="Discard All lands with the discard safety net (ARCHITECTURE §7.3)">
-				🗑
+			<button
+				type="button"
+				class="recently-discarded"
+				class:active={showRecentlyDiscarded}
+				title="Recently discarded"
+				aria-label="Recently discarded"
+				onclick={() => void toggleRecentlyDiscarded()}
+			>
+				🕒
+			</button>
+			<button
+				type="button"
+				class="discard-all"
+				disabled={totalChanged === 0}
+				title="Discard every change — recoverable from Recently Discarded"
+				onclick={requestDiscardAll}
+			>
+				🗑 Discard All
 			</button>
 			<div class="view-toggle" role="group" aria-label="File list view">
 				<button
@@ -167,6 +281,39 @@
 			</div>
 		</div>
 	</div>
+
+	{#if confirmingDiscardAll}
+		<div class="confirm-bar">
+			<span>Discard all {totalChanged} changed file{totalChanged === 1 ? "" : "s"}? This can be undone from Recently Discarded.</span>
+			<div class="confirm-actions">
+				<button type="button" class="cancel" onclick={cancelDiscardAll}>Cancel</button>
+				<button
+					type="button"
+					class="confirm"
+					disabled={!discardAllArmed}
+					onclick={() => void confirmDiscardAll()}
+				>
+					Discard All
+				</button>
+			</div>
+		</div>
+	{/if}
+
+	{#if showRecentlyDiscarded}
+		<div class="recently-discarded-panel">
+			<div class="recently-discarded-head">Recently discarded</div>
+			{#if recentlyDiscarded.length === 0}
+				<p class="empty">Nothing discarded in the last 7 days</p>
+			{:else}
+				{#each recentlyDiscarded as entry (entry.id)}
+					<div class="discarded-entry">
+						<span class="discarded-desc">{entry.description}</span>
+						<button type="button" class="bulk" onclick={() => void restoreEntry(entry)}>Restore</button>
+					</div>
+				{/each}
+			{/if}
+		</div>
+	{/if}
 
 	<div class="sections">
 		<section>
@@ -188,6 +335,7 @@
 						if (row) openDiff(row, "unstaged");
 					}}
 					onFileAction={(p) => void stage(p)}
+				onFileDiscard={(p) => void discardFile(p)}
 				/>
 			{:else}
 				{#each unstagedSorted as row (row.path)}
@@ -200,6 +348,7 @@
 						actionLabel="Stage"
 						onClick={() => openDiff(row, "unstaged")}
 						onAction={() => void stage(row.path)}
+						onDiscard={() => void discardFile(row.path)}
 					/>
 				{/each}
 			{/if}
@@ -281,10 +430,113 @@
 		border: 1px solid var(--border);
 		border-radius: var(--radius-control);
 		background: var(--raised);
+		color: var(--text-muted);
+		font-size: 11px;
+		padding: 2px 8px;
+		cursor: pointer;
+	}
+
+	.discard-all:hover:not(:disabled) {
+		background: var(--overlay);
+		color: var(--danger);
+	}
+
+	.discard-all:disabled {
 		color: var(--text-faint);
+		cursor: not-allowed;
+	}
+
+	.recently-discarded {
+		border: 1px solid var(--border);
+		border-radius: var(--radius-control);
+		background: var(--raised);
+		color: var(--text-muted);
 		font-size: 11px;
 		padding: 2px 6px;
+		cursor: pointer;
+	}
+
+	.recently-discarded:hover,
+	.recently-discarded.active {
+		background: var(--overlay);
+		color: var(--text);
+	}
+
+	.confirm-bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-3);
+		padding: var(--space-2) var(--space-3);
+		background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+		border-bottom: 1px solid var(--border-soft);
+		font-size: 11px;
+		color: var(--text);
+	}
+
+	.confirm-actions {
+		display: flex;
+		gap: var(--space-2);
+		flex-shrink: 0;
+	}
+
+	.confirm-bar .cancel {
+		border: 1px solid var(--border);
+		border-radius: var(--radius-control);
+		background: var(--surface);
+		color: var(--text-muted);
+		font: inherit;
+		font-size: 11px;
+		padding: 2px var(--space-2);
+		cursor: pointer;
+	}
+
+	.confirm-bar .confirm {
+		border: 1px solid var(--danger);
+		border-radius: var(--radius-control);
+		background: var(--danger);
+		color: white;
+		font: inherit;
+		font-size: 11px;
+		font-weight: 600;
+		padding: 2px var(--space-3);
+		cursor: pointer;
+	}
+
+	.confirm-bar .confirm:disabled {
+		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	.recently-discarded-panel {
+		max-height: 160px;
+		overflow-y: auto;
+		border-bottom: 1px solid var(--border-soft);
+		background: var(--raised);
+	}
+
+	.recently-discarded-head {
+		padding: var(--space-2) var(--space-3);
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		color: var(--text-muted);
+	}
+
+	.discarded-entry {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-2);
+		padding: 2px var(--space-3) 2px var(--space-4);
+		font-size: 11px;
+		color: var(--text);
+	}
+
+	.discarded-desc {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.view-toggle {
