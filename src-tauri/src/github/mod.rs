@@ -13,14 +13,9 @@ use crate::credentials;
 use crate::error::AppError;
 
 /// GitHub OAuth App client id — device flow needs no client secret, so shipping this in source is
-/// the normal, documented pattern (ARCHITECTURE.md §11).
-///
-/// SPEC-DEVIATION / ACTION NEEDED: Jamie must register an OAuth App at
-/// github.com → Settings → Developer settings → OAuth Apps, enable "Device Flow" on it, and paste
-/// its client id here before sign-in will work. Left as an obvious placeholder rather than a
-/// blank string so a build with it unset fails loudly (`start_device_flow` below) instead of
-/// silently hitting GitHub with an invalid id.
-pub const GITHUB_OAUTH_CLIENT_ID: &str = "REPLACE_WITH_YOUR_GITHUB_OAUTH_APP_CLIENT_ID";
+/// the normal, documented pattern (ARCHITECTURE.md §11). Jamie's registered OAuth App (Device Flow
+/// enabled), github.com → Settings → Developer settings → OAuth Apps.
+pub const GITHUB_OAUTH_CLIENT_ID: &str = "Ov23li2AvwNiBVTPN2hM";
 
 const DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
 const ACCESS_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
@@ -33,10 +28,10 @@ fn client() -> reqwest::Client {
 }
 
 fn client_id_configured() -> Result<&'static str, AppError> {
-    if GITHUB_OAUTH_CLIENT_ID.starts_with("REPLACE_WITH_") {
+    if GITHUB_OAUTH_CLIENT_ID.is_empty() {
         return Err(AppError::new(
             "BranchKit's GitHub OAuth app isn't configured yet",
-            "GITHUB_OAUTH_CLIENT_ID is still the placeholder in github/mod.rs",
+            "GITHUB_OAUTH_CLIENT_ID is empty in github/mod.rs",
         ));
     }
     Ok(GITHUB_OAUTH_CLIENT_ID)
@@ -212,7 +207,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn placeholder_client_id_is_rejected() {
-        assert!(client_id_configured().is_err());
+    fn configured_client_id_is_accepted() {
+        assert!(client_id_configured().is_ok());
     }
 }

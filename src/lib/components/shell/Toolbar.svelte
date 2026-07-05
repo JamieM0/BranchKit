@@ -5,6 +5,7 @@
 	import { graphNav } from "$lib/stores/graphNav.svelte";
 	import { commandPalette } from "$lib/stores/commandPalette.svelte";
 	import { appSettings } from "$lib/stores/appSettings.svelte";
+	import { settingsWindow } from "$lib/stores/settingsWindow.svelte";
 	import { isMac } from "$lib/platform";
 
 	/** The full toolbar sync/action cluster — DESIGN_SPEC.md §3.2:
@@ -226,6 +227,16 @@
 	<button type="button" class="palette-trigger" onclick={() => commandPalette.open()} title="Command palette">
 		{isMac() ? "⌘K" : "Ctrl+K"}
 	</button>
+
+	<button
+		type="button"
+		class="settings-trigger"
+		onclick={() => settingsWindow.show()}
+		title={isMac() ? "Settings (⌘,)" : "Settings (Ctrl+,)"}
+		aria-label="Settings"
+	>
+		⚙
+	</button>
 </div>
 
 <style>
@@ -400,6 +411,22 @@
 	}
 
 	.palette-trigger:hover {
+		background: var(--overlay);
+		color: var(--text);
+	}
+
+	.settings-trigger {
+		padding: var(--space-1) var(--space-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-control);
+		background: var(--raised);
+		color: var(--text-muted);
+		font-size: 13px;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.settings-trigger:hover {
 		background: var(--overlay);
 		color: var(--text);
 	}
