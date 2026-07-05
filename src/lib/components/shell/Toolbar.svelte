@@ -220,7 +220,7 @@
 	{/if}
 
 	<div class="split">
-		<button type="button" class="plain" onclick={stashAll} title="Stash all uncommitted changes"><TrayArrowDown size={13} /> Stash</button>
+		<button type="button" class="primary" onclick={stashAll} title="Stash all uncommitted changes"><TrayArrowDown size={13} /> Stash</button>
 		<button
 			type="button"
 			class="caret"
