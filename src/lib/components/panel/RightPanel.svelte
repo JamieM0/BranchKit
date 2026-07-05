@@ -1,20 +1,39 @@
 <script lang="ts">
 	import { graphSelection } from "$lib/stores/graphSelection.svelte";
+	import { prPanel } from "$lib/stores/prPanel.svelte";
+	import { graph } from "$lib/stores/graph.svelte";
 	import WorkingDirectoryPanel from "./WorkingDirectoryPanel.svelte";
 	import CommitDetailPanel from "./CommitDetailPanel.svelte";
 	import ComparePanel from "./ComparePanel.svelte";
+	import PrDetailPanel from "./PrDetailPanel.svelte";
+	import CreatePrPanel from "./CreatePrPanel.svelte";
 
 	/** The right panel — DESIGN_SPEC.md §3/§6.1. Mode follows the graph's selection: a Cmd+click
-	 * pair → compare mode; a single commit selected → commit-detail mode; nothing selected (the
-	 * default, and where a WIP-row click would land once that row exists) → working-directory
-	 * mode. */
+	 * pair → compare mode; a single commit selected → commit-detail mode; a PR selected (or the
+	 * Create-PR form open, §12) takes the panel too; nothing selected (the default) →
+	 * working-directory mode. A fresh graph selection always displaces the PR panel; selecting a PR
+	 * (LeftPanel) clears the graph selection the same way. */
 	const compare = $derived(graphSelection.compare);
 	const selectedSha = $derived(graphSelection.selectedSha);
+	const repoId = $derived(graph.repoId);
+
+	let lastGraphKey: string | null = $state(null);
+	$effect(() => {
+		const key = compare ? `${compare.a}:${compare.b}` : selectedSha;
+		if (key !== lastGraphKey) {
+			lastGraphKey = key;
+			if (key !== null) prPanel.close();
+		}
+	});
 </script>
 
 <aside class="panel">
 	{#if compare}
 		<ComparePanel a={compare.a} b={compare.b} />
+	{:else if prPanel.creating && repoId}
+		<CreatePrPanel {repoId} />
+	{:else if prPanel.selectedNumber !== null && repoId}
+		<PrDetailPanel {repoId} />
 	{:else if selectedSha}
 		<CommitDetailPanel sha={selectedSha} />
 	{:else}

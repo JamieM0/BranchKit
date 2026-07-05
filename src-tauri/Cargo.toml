@@ -44,6 +44,13 @@ base64 = "0.22"
 # Myers") — diffs base-vs-ours and base-vs-theirs so conflict regions are computed structurally
 # instead of by parsing `<<<<<<<` markers.
 similar = "3"
+keyring = { version = "4.1.3", features = ["apple-native-keyring-store", "windows-native-keyring-store", "zbus-secret-service-keyring-store", "linux-keyutils-keyring-store"] }
+rand = "0.10.2"
+sha2 = "0.11.0"
+open = "5.3.6"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "http2", "form"] }
+zeroize = "1.9.0"
+dirs = "6.0.0"
 
 [target.'cfg(unix)'.dependencies]
 # process-group kill on timeout (ARCHITECTURE.md §3 rule 3)

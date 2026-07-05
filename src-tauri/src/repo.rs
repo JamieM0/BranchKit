@@ -208,9 +208,12 @@ pub async fn clone_repo(
     let event_name = format!("clone://{request_id}/progress");
     let app_for_progress = app.clone();
 
+    let helper = crate::credentials::helper_config_args();
+    let mut clone_args: Vec<&str> = helper.iter().map(String::as_str).collect();
+    clone_args.extend(["clone", "--progress", &url, &dest_str]);
     let clone_result = git_with_progress(
         &parent,
-        &["clone", "--progress", &url, &dest_str],
+        &clone_args,
         GitOpts::network(),
         move |update| {
             let _ = app_for_progress.emit(

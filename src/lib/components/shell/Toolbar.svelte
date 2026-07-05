@@ -4,6 +4,7 @@
 	import { branchEdit } from "$lib/stores/branchEdit.svelte";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
 	import { commandPalette } from "$lib/stores/commandPalette.svelte";
+	import { appSettings } from "$lib/stores/appSettings.svelte";
 	import { isMac } from "$lib/platform";
 
 	/** The full toolbar sync/action cluster — DESIGN_SPEC.md §3.2:
@@ -21,6 +22,16 @@
 	const ahead = $derived(currentRef?.ahead ?? 0);
 	const hasUpstream = $derived(currentRef?.upstream !== null && currentRef?.upstream !== undefined);
 	const hasStashes = $derived(graph.stashes.length > 0);
+	/** Settings → Git's "default pull mode" (DESIGN_SPEC.md §3.2/§13) — the primary Pull button's
+	 * one-click action; the dropdown still offers all three explicitly. */
+	const defaultPullMode = $derived(appSettings.current.git.defaultPullMode);
+	const defaultPullLabel = $derived(
+		defaultPullMode === "rebase"
+			? "Pull (rebase)"
+			: defaultPullMode === "merge"
+				? "Pull (merge)"
+				: "Pull (fast-forward if possible)",
+	);
 
 	let pullMenuOpen = $state(false);
 	let pushMenuOpen = $state(false);
@@ -120,7 +131,7 @@
 <div class="toolbar">
 	{#if branch}
 		<div class="split">
-			<button type="button" class="primary" onclick={() => doPull("ff")} title="Pull (fast-forward if possible)">
+			<button type="button" class="primary" onclick={() => doPull(defaultPullMode)} title={defaultPullLabel}>
 				Pull
 				{#if behind > 0}<span class="badge behind">↓{behind}</span>{/if}
 			</button>

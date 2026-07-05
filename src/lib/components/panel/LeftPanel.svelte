@@ -10,6 +10,9 @@
 	import { branchEdit } from "$lib/stores/branchEdit.svelte";
 	import { repos } from "$lib/stores/repo.svelte";
 	import { worktreeDialog } from "$lib/stores/worktreeDialog.svelte";
+	import { github } from "$lib/stores/github.svelte";
+	import { prPanel } from "$lib/stores/prPanel.svelte";
+	import { settingsWindow } from "$lib/stores/settingsWindow.svelte";
 	import * as actions from "$lib/actions";
 	import BranchMenu from "$lib/components/graph/BranchMenu.svelte";
 	import StashMenu from "$lib/components/graph/StashMenu.svelte";
@@ -59,6 +62,14 @@
 	const tags = $derived(model.tags.filter((t) => matches(t.shortName)));
 	const stashes = $derived(graph.stashes.filter((s) => matches(s.subject)));
 	const worktrees = $derived(graph.worktrees.filter((w) => matches(w.path)));
+	const prs = $derived(github.pullRequests.filter((p) => matches(p.title) || matches(p.headRef)));
+
+	// PULL REQUESTS section — DESIGN_SPEC.md §5/§12. Degrades to a quiet "Connect GitHub" row when
+	// not signed in; loads (and reloads on repo switch) only once connected.
+	$effect(() => {
+		if (repoId && github.connected) void github.loadPullRequests(repoId);
+		else github.reset();
+	});
 
 	// --- pill construction for menu/actions ---
 	function localPill(ref: RefInfo): Pill {
@@ -293,6 +304,35 @@
 					{/if}
 				</section>
 			{/each}
+
+			<!-- PULL REQUESTS -->
+			<section>
+				<button type="button" class="section-head" onclick={() => toggleSection("prs")}>
+					<span class="chev" class:open={sectionOpen("prs")}>▸</span>
+					PULL REQUESTS <span class="count">{prs.length}</span>
+				</button>
+				{#if sectionOpen("prs")}
+					{#if !github.connected}
+						<button type="button" class="row connect-gh" onclick={() => settingsWindow.show("integrations")}>
+							<span class="presence" aria-hidden="true">🔗</span>
+							<span class="name">Connect GitHub</span>
+						</button>
+					{:else}
+						{#each prs as pr (pr.number)}
+							<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+							<div class="row" onclick={() => prPanel.selectPr(pr.number)}>
+								<img class="pr-avatar" src={pr.authorAvatarUrl} alt="" />
+								<span class="name">#{pr.number} {pr.title}</span>
+							</div>
+						{/each}
+						{#if prs.length === 0}<p class="empty">No open pull requests</p>{/if}
+						<button type="button" class="row add-pr" onclick={() => prPanel.openCreate()}>
+							<span class="presence" aria-hidden="true">＋</span>
+							<span class="name">New pull request</span>
+						</button>
+					{/if}
+				{/if}
+			</section>
 
 			<!-- TAGS -->
 			{#if tags.length > 0}
@@ -780,5 +820,25 @@
 		padding: 2px var(--space-4) var(--space-2);
 		font-size: 11px;
 		color: var(--text-faint);
+	}
+
+	button.row {
+		width: 100%;
+		border: none;
+		background: none;
+		text-align: left;
+		font: inherit;
+	}
+
+	.pr-avatar {
+		width: 14px;
+		height: 14px;
+		border-radius: var(--radius-pill);
+		flex-shrink: 0;
+	}
+
+	.connect-gh .name,
+	.add-pr .name {
+		color: var(--text-muted);
 	}
 </style>

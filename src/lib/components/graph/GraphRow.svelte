@@ -1,13 +1,17 @@
 <script lang="ts">
 	import RefPill from "./RefPill.svelte";
 	import BranchNameEditor from "./BranchNameEditor.svelte";
+	import CiDot from "./CiDot.svelte";
 	import { RIGHT_GUTTER, ROW_HEIGHT } from "$lib/graph/geometry";
 	import { graphView } from "$lib/stores/graphView.svelte";
 	import { branchEdit } from "$lib/stores/branchEdit.svelte";
 	import { filter, rowMatchesQuery } from "$lib/stores/filter.svelte";
 	import { dnd } from "$lib/stores/dnd.svelte";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
-	import { relativeTime } from "$lib/format";
+	import { formatCommitDate } from "$lib/format";
+	import { appSettings } from "$lib/stores/appSettings.svelte";
+	import { github } from "$lib/stores/github.svelte";
+	import { githubChecks } from "$lib/stores/githubChecks.svelte";
 	import type { GraphViewRow } from "$lib/stores/graph.svelte";
 	import type { Pill } from "$lib/graph/pills";
 
@@ -179,6 +183,9 @@
 		{:else}
 			<span class="pending">Loading…</span>
 		{/if}
+		{#if row.kind === "commit" && repoId && github.connected}
+			<CiDot {repoId} sha={row.sha} />
+		{/if}
 		<button type="button" class="copy-sha" aria-label="Copy commit SHA" title="Copy SHA" onclick={copy}>
 			⧉ {row.sha.slice(0, 7)}
 		</button>
@@ -191,7 +198,9 @@
 	{/if}
 	{#if graphView.date}
 		<div class="cell date" style="width: {graphView.widths.date}px;">
-			{row.kind === "commit" && row.meta ? relativeTime(row.meta.authorTime) : ""}
+			{row.kind === "commit" && row.meta
+				? formatCommitDate(row.meta.authorTime, appSettings.current.appearance.dateStyle)
+				: ""}
 		</div>
 	{/if}
 	{#if graphView.sha}

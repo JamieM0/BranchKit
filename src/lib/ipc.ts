@@ -1,22 +1,32 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
+  AppSettings,
   BlameRun,
   ChangedFile,
   ChangeKind,
+  CommitCheckStatus,
   CommitMeta,
   ConflictState,
+  CreatedPr,
+  CredentialInfo,
+  DeviceCode,
   DiscardedEntry,
   Divergence,
   FileConflictRegions,
   FileDiff,
   FileHistoryEntry,
   GitIdentity,
+  GithubUser,
   GraphTopologyRow,
+  PullRequest,
   RecentRepo,
   RefsResponse,
   RepoInfo,
+  SshAgentStatus,
+  SshKeyInfo,
   StatusReport,
   WorktreeInfo,
 } from "./types";
@@ -494,6 +504,12 @@ export async function onRepoChanged(
 
 /** Subscribes to a clone's progress stream — see the SPEC-DEVIATION note on `clone_repo` in
  * repo.rs: there's no repo id yet during a clone, so progress uses a request-scoped channel. */
+/** Opens `url` in the system default browser — GitHub PR/check "Open in browser" links (DESIGN_SPEC
+ * §12), never navigating the app's own webview. */
+export async function openInBrowser(url: string): Promise<void> {
+  await openUrl(url);
+}
+
 /** Native "Open repo" folder picker — not an `invoke()` call itself, but the dialog plugin is
  * the only sanctioned way to reach the OS filesystem picker, so it lives here alongside ipc. */
 export async function pickFolder(title: string): Promise<string | null> {
@@ -518,4 +534,96 @@ export async function onCloneProgress(
       handler(event.payload.phase, event.payload.percent);
     }
   });
+}
+
+// --- settings (DESIGN_SPEC.md §13) ---
+
+export async function getSettings(): Promise<AppSettings> {
+  return invoke("get_settings");
+}
+
+export async function updateSettings(settings: AppSettings): Promise<void> {
+  return invoke("update_settings", { settings });
+}
+
+// --- credentials (ARCHITECTURE.md §8, DESIGN_SPEC.md §13) ---
+
+export async function listCredentials(): Promise<CredentialInfo[]> {
+  return invoke("list_credentials");
+}
+
+export async function removeCredential(host: string, username: string): Promise<void> {
+  return invoke("remove_credential", { host, username });
+}
+
+/** Saves a credential entered in the auth-failure dialog; the caller retries the failed op once
+ * right after (ARCHITECTURE.md §8). */
+export async function saveCredential(host: string, username: string, password: string): Promise<void> {
+  return invoke("save_credential", { host, username, password });
+}
+
+export async function getSshAgentStatus(): Promise<SshAgentStatus> {
+  return invoke("get_ssh_agent_status");
+}
+
+export async function getGeneratedSshKey(): Promise<SshKeyInfo | null> {
+  return invoke("get_generated_ssh_key");
+}
+
+export async function generateSshKey(passphrase: string): Promise<SshKeyInfo> {
+  return invoke("generate_ssh_key", { passphrase });
+}
+
+// --- GitHub (ARCHITECTURE.md §11, DESIGN_SPEC.md §12) ---
+
+export async function startDeviceFlow(): Promise<DeviceCode> {
+  return invoke("start_device_flow");
+}
+
+export async function pollDeviceFlow(
+  deviceCode: string,
+  interval: number,
+  expiresIn: number,
+): Promise<GithubUser> {
+  return invoke("poll_device_flow", { deviceCode, interval, expiresIn });
+}
+
+export async function getGithubConnection(): Promise<GithubUser | null> {
+  return invoke("get_github_connection");
+}
+
+export async function githubSignOut(): Promise<void> {
+  return invoke("github_sign_out");
+}
+
+export async function listPullRequests(repoId: string): Promise<PullRequest[]> {
+  return invoke("list_pull_requests", { repoId });
+}
+
+export async function getCheckStatus(repoId: string, sha: string): Promise<CommitCheckStatus> {
+  return invoke("get_check_status", { repoId, sha });
+}
+
+export async function createPullRequest(
+  repoId: string,
+  base: string,
+  head: string,
+  title: string,
+  body: string,
+): Promise<CreatedPr> {
+  return invoke("create_pull_request", { repoId, base, head, title, body });
+}
+
+export async function mergePullRequest(
+  repoId: string,
+  number: number,
+  method: "merge" | "squash" | "rebase",
+): Promise<void> {
+  return invoke("merge_pull_request", { repoId, number, method });
+}
+
+/** Fetches the PR's head (works for fork PRs via `pull/<n>/head`) and checks it out; resolves to
+ * the local branch name it created (`pr-<n>`). */
+export async function checkoutPrHead(repoId: string, number: number): Promise<string> {
+  return invoke("checkout_pr_head", { repoId, number });
 }

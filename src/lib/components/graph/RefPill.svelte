@@ -2,6 +2,7 @@
 	import type { Pill } from "$lib/graph/pills";
 	import { dnd } from "$lib/stores/dnd.svelte";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
+	import { github } from "$lib/stores/github.svelte";
 	import BadgeTooltip from "./BadgeTooltip.svelte";
 
 	/** A branch/tag pill in the BRANCH/TAG column — DESIGN_SPEC.md §4.4. Presence icons (💻 local,
@@ -31,6 +32,12 @@
 	} = $props();
 
 	const hasBadge = $derived(pill.ahead > 0 || pill.behind > 0);
+	// A small PR icon in the pill's tooltip area — DESIGN_SPEC.md §12.
+	const matchingPr = $derived(
+		pill.kind === "branch"
+			? (github.pullRequests.find((p) => p.headRef === (pill.localBranch ?? pill.name)) ?? null)
+			: null,
+	);
 	// A pill can be dropped onto if a *different* branch/commit is being dragged.
 	const isDropTarget = $derived(
 		dnd.dragging && dnd.source !== null && dnd.source.key !== pill.key,
@@ -126,6 +133,9 @@
 	{#if pill.kind === "branch"}
 		{#if pill.local}<span class="presence" title="exists locally" aria-label="local">💻</span>{/if}
 		{#if pill.remote}<span class="presence" title={pill.remoteName ?? "remote"} aria-label="remote">☁</span>{/if}
+		{#if matchingPr}
+			<span class="presence" title="PR #{matchingPr.number}: {matchingPr.title}" aria-label="has pull request">🔀</span>
+		{/if}
 	{/if}
 	{#if hasBadge}
 		<button

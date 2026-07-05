@@ -13,6 +13,8 @@ import { commitDraft } from "$lib/stores/commitDraft.svelte";
 import { stagedRows } from "$lib/status/sections";
 import { repos } from "$lib/stores/repo.svelte";
 import { network } from "$lib/stores/network.svelte";
+import { credentialDialog } from "$lib/stores/credentialDialog.svelte";
+import { github } from "$lib/stores/github.svelte";
 
 interface AppErrorShape {
 	userMessage: string;
@@ -66,21 +68,34 @@ function suggestionAction(err: AppErrorShape, ctx: ErrorContext): ToastAction | 
 				? { label, run: () => stashAndCheckout(ctx.repoId, ctx.checkoutTarget!) }
 				: undefined;
 		case "open-credentials-settings":
-			// SPEC-DEVIATION: the dynamic Settings window (DESIGN_SPEC.md §13) hasn't landed yet —
-			// surface the guidance as a toast instead of a dead link.
+			// The auth-failure → credential dialog → retry-once flow (ARCHITECTURE.md §8).
 			return {
 				label,
 				run: () => {
-					toasts.push({
-						message: "Open Settings → Credentials to fix this",
-						tone: "info",
-						icon: "alert",
-					});
+					void openCredentialDialogFor(ctx);
 				},
 			};
 		default:
 			return undefined;
 	}
+}
+
+/** Best-effort host guess for the credential dialog — the origin remote's host, editable in the
+ * dialog itself so a wrong guess (or a non-origin remote) is never a dead end. */
+async function guessCredentialHost(repoId: string): Promise<string> {
+	try {
+		const url = await ipc.getRemoteUrl(repoId, "origin");
+		const ssh = url.match(/^git@([^:]+):/);
+		const https = url.match(/^https?:\/\/([^/]+)\//);
+		return ssh?.[1] ?? https?.[1] ?? "github.com";
+	} catch {
+		return "github.com";
+	}
+}
+
+async function openCredentialDialogFor(ctx: ErrorContext): Promise<void> {
+	const host = await guessCredentialHost(ctx.repoId);
+	credentialDialog.open(host, ctx.retry);
 }
 
 /** Reports a failed operation as an error toast, attaching the suggestion's action verb when `ctx`
@@ -318,19 +333,36 @@ export async function push(repoId: string, force: boolean, branch: string): Prom
 
 /** Push a branch with no upstream yet, setting `origin/<name>` as its tracking ref — the
  * toolbar's Push-becomes-**Publish** state (DESIGN_SPEC.md §3.2). Success offers **Create pull
- * request** only once GitHub integration lands (§8/§22) — omitted here (SPEC-DEVIATION: no
- * GitHub integration yet in this build). */
+ * request** once GitHub is connected (§8/§22). */
 export async function publish(repoId: string, name: string): Promise<void> {
 	repos.setBusy(repoId, true);
 	try {
 		await ipc.publish(repoId, name);
 		network.markOnline();
-		toasts.push({ message: `Published \`${name}\``, tone: "success", icon: "check" });
+		toasts.push({
+			message: `Published \`${name}\``,
+			tone: "success",
+			icon: "check",
+			action: github.connected
+				? { label: "Create pull request", run: () => openCreatePr(name) }
+				: undefined,
+		});
 	} catch (e) {
 		reportError(e, { repoId, branch: name, retry: () => publish(repoId, name) });
 	} finally {
 		repos.setBusy(repoId, false);
 	}
+}
+
+/** Opens the Create-PR panel prefilled with `head` — the Publish toast's action and the PULL
+ * REQUESTS section's "New pull request" affordance (DESIGN_SPEC.md §12). Deferred `import` (rather
+ * than a top-level one) avoids a store/actions import cycle: `prPanel` doesn't need to know about
+ * `actions`, and `actions` only needs this one function from it. */
+async function openCreatePr(head: string): Promise<void> {
+	const { prPanel } = await import("$lib/stores/prPanel.svelte");
+	const { createPrDraft } = await import("$lib/stores/createPrDraft.svelte");
+	createPrDraft.prefillHead(head);
+	prPanel.openCreate();
 }
 
 /** Fetch every remote — the toolbar Pull dropdown's "Fetch all" (DESIGN_SPEC.md §3.2). Quiet on
@@ -662,6 +694,62 @@ export async function pruneWorktrees(repoId: string): Promise<void> {
 	try {
 		await ipc.pruneWorktrees(repoId);
 		toasts.push({ message: "Pruned stale worktrees", tone: "success", icon: "check" });
+	} catch (e) {
+		const { userMessage, raw } = asAppError(e);
+		toasts.pushError(userMessage, raw);
+	}
+}
+
+// --- GitHub (ARCHITECTURE.md §11, DESIGN_SPEC.md §12) ---
+
+export async function createPullRequest(
+	repoId: string,
+	base: string,
+	head: string,
+	title: string,
+	body: string,
+): Promise<number | null> {
+	try {
+		const pr = await ipc.createPullRequest(repoId, base, head, title, body);
+		toasts.push({
+			message: `Created pull request #${pr.number}`,
+			tone: "success",
+			icon: "check",
+			action: { label: "Open in browser", run: () => void ipc.openInBrowser(pr.htmlUrl) },
+		});
+		return pr.number;
+	} catch (e) {
+		const { userMessage, raw } = asAppError(e);
+		toasts.pushError(userMessage, raw);
+		return null;
+	}
+}
+
+export async function mergePullRequest(
+	repoId: string,
+	number: number,
+	method: "merge" | "squash" | "rebase",
+): Promise<boolean> {
+	try {
+		await ipc.mergePullRequest(repoId, number, method);
+		toasts.push({ message: `Merged pull request #${number}`, tone: "success", icon: "merge" });
+		return true;
+	} catch (e) {
+		const { userMessage, raw } = asAppError(e);
+		toasts.pushError(userMessage, raw);
+		return false;
+	}
+}
+
+export async function checkoutPrHead(repoId: string, number: number): Promise<void> {
+	try {
+		const branch = await ipc.checkoutPrHead(repoId, number);
+		toasts.push({
+			message: `Switched to \`${branch}\``,
+			tone: "success",
+			icon: "check",
+			action: { label: "Back", run: () => backToPrevious(repoId) },
+		});
 	} catch (e) {
 		const { userMessage, raw } = asAppError(e);
 		toasts.pushError(userMessage, raw);

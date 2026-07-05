@@ -1,7 +1,10 @@
+pub mod credentials;
 pub mod error;
 pub mod events;
 pub mod git;
+pub mod github;
 pub mod repo;
+pub mod settings;
 pub mod state;
 pub mod watcher;
 
@@ -129,6 +132,23 @@ pub fn run() {
             git::conflict::get_conflict_regions,
             git::conflict::confirm_file,
             git::conflict::reopen_file,
+            settings::get_settings,
+            settings::update_settings,
+            credentials::list_credentials,
+            credentials::remove_credential,
+            credentials::save_credential,
+            credentials::get_ssh_agent_status,
+            credentials::get_generated_ssh_key,
+            credentials::generate_ssh_key,
+            github::start_device_flow,
+            github::poll_device_flow,
+            github::get_github_connection,
+            github::github_sign_out,
+            github::api::list_pull_requests,
+            github::api::get_check_status,
+            github::api::create_pull_request,
+            github::api::merge_pull_request,
+            github::api::checkout_pr_head,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

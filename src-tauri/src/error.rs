@@ -179,6 +179,18 @@ impl From<notify::Error> for AppError {
     }
 }
 
+impl From<keyring::Error> for AppError {
+    fn from(e: keyring::Error) -> Self {
+        Self::new("Could not access your OS keychain", e.to_string())
+    }
+}
+
+impl From<reqwest::Error> for AppError {
+    fn from(e: reqwest::Error) -> Self {
+        Self::new("Could not reach GitHub", e.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

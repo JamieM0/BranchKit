@@ -327,3 +327,120 @@ export interface BlameRun {
 	startLine: number;
 	lines: string[];
 }
+
+// --- settings.rs ---------------------------------------------------------
+
+export type PullModeSetting = "ff" | "rebase" | "merge";
+
+export interface GeneralSettings {
+	autoFetchIntervalMinutes: number;
+	openLastReposOnLaunch: boolean;
+	defaultCloneDir: string | null;
+}
+
+export interface AppearanceSettings {
+	theme: "system" | "dark" | "light";
+	graphDensity: "comfortable" | "compact";
+	dateStyle: "relative" | "absolute";
+	showAvatars: boolean;
+}
+
+export interface GitSettings {
+	defaultPullMode: PullModeSetting;
+	pushTagsWithCommits: boolean;
+	pruneOnFetch: boolean;
+	combineTrackingBranches: boolean;
+	commitSummaryGuideLength: number;
+}
+
+export type AiProviderKind = "local" | "ollama" | "remote";
+export type RemoteApiFormat = "openAi" | "anthropic";
+export type CommitStyle = "plain" | "conventional";
+
+export interface AiSettings {
+	enabled: boolean;
+	provider: AiProviderKind;
+	ollamaBaseUrl: string;
+	ollamaModel: string | null;
+	remoteFormat: RemoteApiFormat;
+	remoteBaseUrl: string;
+	remoteModel: string;
+	style: CommitStyle;
+	maxDiffSizeKb: number;
+}
+
+export interface AppSettings {
+	general: GeneralSettings;
+	appearance: AppearanceSettings;
+	git: GitSettings;
+	ai: AiSettings;
+}
+
+// --- credentials.rs ---------------------------------------------------------
+
+export interface CredentialInfo {
+	host: string;
+	username: string;
+	/** Unix seconds. */
+	lastUsedAt: number;
+}
+
+export interface SshAgentStatus {
+	agentRunning: boolean;
+	identities: string[];
+}
+
+export interface SshKeyInfo {
+	publicKey: string;
+	path: string;
+}
+
+// --- github/mod.rs, github/api.rs ---------------------------------------------------------
+
+export interface DeviceCode {
+	deviceCode: string;
+	userCode: string;
+	verificationUri: string;
+	expiresIn: number;
+	interval: number;
+}
+
+export interface GithubUser {
+	login: string;
+	avatarUrl: string;
+}
+
+export interface PullRequest {
+	number: number;
+	title: string;
+	body: string;
+	state: string;
+	draft: boolean;
+	headRef: string;
+	baseRef: string;
+	headSha: string;
+	authorLogin: string;
+	authorAvatarUrl: string;
+	htmlUrl: string;
+	commentCount: number;
+	reviewers: string[];
+}
+
+export interface CheckRun {
+	name: string;
+	status: string;
+	conclusion: string | null;
+	htmlUrl: string;
+}
+
+export type CheckSummary = "success" | "failure" | "pending" | "none";
+
+export interface CommitCheckStatus {
+	summary: CheckSummary;
+	runs: CheckRun[];
+}
+
+export interface CreatedPr {
+	number: number;
+	htmlUrl: string;
+}

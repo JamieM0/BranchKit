@@ -6,7 +6,9 @@
  * backup that's restored on untick (§15.15) and the one-shot "move focus to the description"
  * signal (Enter from a summary field). */
 
-/** Commit-summary guide length — DESIGN_SPEC.md §7/§13 (default 72). */
+import { appSettings } from "./appSettings.svelte";
+
+/** Commit-summary guide length — DESIGN_SPEC.md §7/§13 (default 72, configurable in Settings → Git). */
 export const COMMIT_GUIDE = 72;
 
 /** Counter tint: `--text-faint` normally, `--warn` when close, `--danger` once past the guide. */
@@ -25,9 +27,10 @@ class CommitDraftStore {
 	#savedSummary = "";
 	#savedDescription = "";
 
-	/** Chars remaining before the 72 guide; goes negative past it — shown, never blocks (§7/§17). */
+	/** Chars remaining before the guide length (Settings → Git, default 72); goes negative past it —
+	 * shown, never blocks (§7/§17). */
 	get remaining(): number {
-		return COMMIT_GUIDE - this.summary.length;
+		return appSettings.current.git.commitSummaryGuideLength - this.summary.length;
 	}
 
 	/** `--warn` at ≤10 remaining, `--danger` once negative, `--text-faint` otherwise (§7). */

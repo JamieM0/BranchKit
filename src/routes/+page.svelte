@@ -15,6 +15,8 @@
   import FileInspector from "$lib/components/diff/FileInspector.svelte";
   import ToastStack from "$lib/components/shell/ToastStack.svelte";
   import CommandPalette from "$lib/components/shell/CommandPalette.svelte";
+  import CredentialDialog from "$lib/components/shell/CredentialDialog.svelte";
+  import SettingsWindow from "$lib/components/settings/SettingsWindow.svelte";
   import { commandPalette } from "$lib/stores/commandPalette.svelte";
   import { isModEvent } from "$lib/platform";
   import { onboarding } from "$lib/stores/onboarding.svelte";
@@ -30,10 +32,22 @@
   import { keepSession } from "$lib/stores/keepSession.svelte";
   import { network, retryOnFocus } from "$lib/stores/network.svelte";
   import { notifyBehindIncrease, resetBehindTracking } from "$lib/stores/behindNotifier";
+  import { appSettings } from "$lib/stores/appSettings.svelte";
+  import { settingsWindow } from "$lib/stores/settingsWindow.svelte";
+  import { github } from "$lib/stores/github.svelte";
+  import { githubChecks } from "$lib/stores/githubChecks.svelte";
+  import { prPanel } from "$lib/stores/prPanel.svelte";
+  import { createPrDraft } from "$lib/stores/createPrDraft.svelte";
   import * as actions from "$lib/actions";
 
   let showPicker = $state(false);
   let showClone = $state(false);
+
+  // Settings + GitHub connection are app-wide, not per-repo — load once at startup.
+  $effect(() => {
+    void appSettings.load();
+    void github.checkConnection();
+  });
 
   // ARCHITECTURE.md §9/§14: once offline, retry a fetch as soon as the window regains focus
   // rather than waiting for the next auto-fetch tick.
@@ -61,6 +75,9 @@
         fileInspector.close();
         // A half-typed commit draft shouldn't follow you into another repo (§7).
         commitDraft.reset();
+        prPanel.close();
+        createPrDraft.reset();
+        githubChecks.reset();
       }
     } else if (openedGraphId) {
       resetBehindTracking(openedGraphId);
@@ -71,6 +88,10 @@
       diffView.close();
       fileInspector.close();
       commitDraft.reset();
+      prPanel.close();
+      createPrDraft.reset();
+      github.reset();
+      githubChecks.reset();
     }
   });
 
@@ -138,7 +159,7 @@
       if (id && branch) {
         e.preventDefault();
         if (e.shiftKey) void actions.push(id, false, branch);
-        else void actions.pull(id, "ff", branch);
+        else void actions.pull(id, appSettings.current.git.defaultPullMode, branch);
       }
     } else if (key === "s") {
       if (id) {
@@ -146,6 +167,10 @@
         if (e.shiftKey) void actions.popStash(id, "stash@{0}", "");
         else void actions.stashPush(id, {});
       }
+    } else if (key === ",") {
+      // Cmd+, → Settings (§10 global map).
+      e.preventDefault();
+      settingsWindow.show();
     } else if (/^[1-9]$/.test(key)) {
       e.preventDefault();
       repos.switchToIndex(Number(key));
@@ -198,6 +223,8 @@
 
 <ToastStack />
 <CommandPalette />
+<CredentialDialog />
+<SettingsWindow />
 
 {#if showPicker}
   <RepoPicker onOpenPath={handleOpenPath} onRequestClone={requestClone} onDismiss={dismissPicker} />

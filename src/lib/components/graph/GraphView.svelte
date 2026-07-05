@@ -25,6 +25,7 @@
 	import { status } from "$lib/stores/status.svelte";
 	import { graphSelection } from "$lib/stores/graphSelection.svelte";
 	import { graphView } from "$lib/stores/graphView.svelte";
+	import { appSettings } from "$lib/stores/appSettings.svelte";
 	import { buildWipRow, WIP_SHA, type WipRow } from "$lib/graph/wip";
 	import type { GraphViewRow } from "$lib/stores/graph.svelte";
 	import { branchEdit } from "$lib/stores/branchEdit.svelte";
@@ -242,7 +243,10 @@
 			ctx.fillStyle = c.lanes[row.node.colorIndex] ?? c.accent;
 			ctx.fill();
 		} else {
-			const bitmap = row.meta ? avatars.get(row.meta.authorEmail) : null;
+			// Settings → Appearance "show avatars" (DESIGN_SPEC.md §13) — off falls straight to the
+			// plain lane-colored dot below, skipping both the real avatar and the initials fallback.
+			const showAvatars = appSettings.current.appearance.showAvatars;
+			const bitmap = row.meta && showAvatars ? avatars.get(row.meta.authorEmail) : null;
 			if (bitmap) {
 				ctx.save();
 				ctx.beginPath();
@@ -255,7 +259,7 @@
 				ctx.strokeStyle = c.surface;
 				ctx.lineWidth = 1;
 				ctx.stroke();
-			} else if (row.meta) {
+			} else if (row.meta && showAvatars) {
 				drawInitialsDisc(
 					ctx,
 					x,

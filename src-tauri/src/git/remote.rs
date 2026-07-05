@@ -15,12 +15,21 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, State};
 
+use crate::credentials;
 use crate::error::AppError;
 use crate::events::{ChangeKind, WatchedKind};
 use crate::state::{AppState, RepoHandle};
 
 use super::exec::{git_with_progress, GitOpts};
 use super::ops::{emit_changes, require_repo};
+
+/// Prepends the credential-helper `-c` args (ARCHITECTURE.md §8) to a network command's argument
+/// list — they must come before the git subcommand name.
+fn with_credential_helper<'a>(helper: &'a [String], rest: &[&'a str]) -> Vec<&'a str> {
+    let mut args: Vec<&str> = helper.iter().map(String::as_str).collect();
+    args.extend(rest);
+    args
+}
 
 /// How often the auto-fetch interval ticks to check whether a fetch is due — not the fetch
 /// interval itself (that's `AUTO_FETCH_INTERVAL`), just how often we check the gates.
@@ -53,9 +62,10 @@ pub async fn fetch_all(
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
     handle.begin_self_op(&[WatchedKind::Refs, WatchedKind::Remote]);
+    let helper = credentials::helper_config_args();
     let result = git_with_progress(
         &handle.path,
-        &["fetch", "--all", "--prune", "--progress"],
+        &with_credential_helper(&helper, &["fetch", "--all", "--prune", "--progress"]),
         GitOpts::network(),
         progress_emitter(app.clone(), repo_id.clone()),
     )
@@ -90,9 +100,10 @@ pub async fn pull(
         WatchedKind::WorkingTree,
         WatchedKind::Index,
     ]);
+    let helper = credentials::helper_config_args();
     let result = git_with_progress(
         &handle.path,
-        &["pull", mode_flag, "--progress"],
+        &with_credential_helper(&helper, &["pull", mode_flag, "--progress"]),
         GitOpts::network(),
         progress_emitter(app.clone(), repo_id.clone()),
     )
@@ -119,9 +130,10 @@ pub async fn push(
     if force {
         args.push("--force-with-lease");
     }
+    let helper = credentials::helper_config_args();
     let result = git_with_progress(
         &handle.path,
-        &args,
+        &with_credential_helper(&helper, &args),
         GitOpts::network(),
         progress_emitter(app.clone(), repo_id.clone()),
     )
@@ -143,9 +155,10 @@ pub async fn publish(
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
     handle.begin_self_op(&[WatchedKind::Refs, WatchedKind::Remote]);
+    let helper = credentials::helper_config_args();
     let result = git_with_progress(
         &handle.path,
-        &["push", "--progress", "-u", "origin", &name],
+        &with_credential_helper(&helper, &["push", "--progress", "-u", "origin", &name]),
         GitOpts::network(),
         progress_emitter(app.clone(), repo_id.clone()),
     )
@@ -184,9 +197,10 @@ pub fn spawn_auto_fetch(
                 continue;
             };
             handle.begin_self_op(&[WatchedKind::Refs, WatchedKind::Remote]);
+            let helper = credentials::helper_config_args();
             let result = git_with_progress(
                 &handle.path,
-                &["fetch", "--all", "--prune", "--progress"],
+                &with_credential_helper(&helper, &["fetch", "--all", "--prune", "--progress"]),
                 GitOpts::network(),
                 progress_emitter(app.clone(), repo_id.clone()),
             )
