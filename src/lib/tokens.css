@@ -8,13 +8,15 @@
   --border: #2c3040;
   --border-soft: #232736;
   --text: #e6e9f2;
-  --text-muted: #8b91a7;
+  /* Nudged from #8b91a7 / #ff5c5c so muted text and danger menu items clear AA on --overlay
+   * (menus/popovers) too — see the contrast table in docs/QA.md. */
+  --text-muted: #959bb0;
   --text-faint: #5c6274;
   --accent: #3ddc97;
   --accent-dim: #2aa876;
   --info: #6ea8ff;
   --warn: #ffb454;
-  --danger: #ff5c5c;
+  --danger: #ff6b6b;
   --ahead: #3ddc97;
   --behind: #ffb454;
 }
@@ -29,13 +31,15 @@
   --text: #1c1f2b;
   --text-muted: #5c6274;
   --text-faint: #8b91a7;
-  --accent: #23b880;
-  --accent-dim: #1a8c62;
-  --info: #3d7fe0;
-  --warn: #cc8320;
-  --danger: #e0453f;
-  --ahead: #23b880;
-  --behind: #cc8320;
+  /* Status hues darkened for WCAG AA as *text* on every light surface incl. --raised (verified
+   * by the contrast script in docs/QA.md — the originals sat at 2.2–4.1:1). */
+  --accent: #117a55;
+  --accent-dim: #0d5c40;
+  --info: #2b66c2;
+  --warn: #8f5c0f;
+  --danger: #c0332d;
+  --ahead: #117a55;
+  --behind: #8f5c0f;
 }
 
 :root {
@@ -113,4 +117,11 @@ textarea,
 .selectable * {
   -webkit-user-select: text;
   user-select: text;
+}
+
+/* Keyboard-visible focus everywhere — DESIGN_SPEC.md §14's "visible focus rings (2px accent)".
+ * :focus-visible only, so mouse clicks don't paint rings on every button. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }

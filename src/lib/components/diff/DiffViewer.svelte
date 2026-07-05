@@ -385,6 +385,11 @@
 			</div>
 		{:else if diff.hunks.length === 0}
 			<p class="empty">No changes</p>
+		{:else if diff.eolOnly}
+			<!-- ARCHITECTURE.md §14: don't present a wall of CRLF↔LF flips as real changes. -->
+			<p class="empty">
+				Only line endings changed in this file (CRLF ↔ LF) — the content is identical.
+			</p>
 		{:else if viewMode === "unified"}
 			{#each preparedHunks as prepared, hi (hi)}
 				<div class="hunk">

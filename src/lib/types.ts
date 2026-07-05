@@ -220,6 +220,9 @@ export interface FileDiff {
 	oldPath: string | null;
 	newPath: string | null;
 	hunks: Hunk[];
+	/** Every change is CRLF↔LF noise (the diff vanishes under `--ignore-cr-at-eol`) — the viewer
+	 * shows a quiet "line endings only" note (ARCHITECTURE.md §14). */
+	eolOnly: boolean;
 }
 
 export type ChangedFileStatus =

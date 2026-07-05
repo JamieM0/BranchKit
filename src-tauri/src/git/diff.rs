@@ -50,6 +50,10 @@ pub struct FileDiff {
     pub old_path: Option<String>,
     pub new_path: Option<String>,
     pub hunks: Vec<Hunk>,
+    /// The whole diff disappears under `--ignore-cr-at-eol` — every change is CRLF↔LF noise.
+    /// The viewer shows a quiet "line endings only" note above the hunks (ARCHITECTURE.md §14).
+    #[serde(default)]
+    pub eol_only: bool,
 }
 
 /// Worktree vs index: `git diff -- <path>`.
@@ -97,7 +101,21 @@ async fn run_diff(repo: &Path, args: &[&str], ignore_whitespace: bool) -> Result
         full_args.insert(1, "-w");
     }
     let output = git(repo, &full_args, GitOpts::default()).await?;
-    Ok(parse_diff_output(&output.stdout))
+    let mut diff = parse_diff_output(&output.stdout);
+
+    // ARCHITECTURE.md §14 (Windows autocrlf noise): if the diff vanishes under
+    // `--ignore-cr-at-eol`, every change is a CRLF↔LF flip — flag it so the viewer can say so
+    // quietly instead of presenting a wall of touched-every-line hunks as real changes.
+    if !ignore_whitespace && !diff.is_binary && !diff.hunks.is_empty() {
+        let mut eol_args: Vec<&str> = args.to_vec();
+        eol_args.insert(1, "--ignore-cr-at-eol");
+        if let Ok(eol_output) = git(repo, &eol_args, GitOpts::default()).await {
+            if parse_diff_output(&eol_output.stdout).hunks.is_empty() {
+                diff.eol_only = true;
+            }
+        }
+    }
+    Ok(diff)
 }
 
 #[tauri::command]
@@ -515,6 +533,7 @@ pub fn parse_diff_output(stdout: &[u8]) -> FileDiff {
         old_path,
         new_path,
         hunks,
+        eol_only: false,
     }
 }
 
