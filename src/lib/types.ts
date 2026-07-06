@@ -467,3 +467,15 @@ export interface CreatedPr {
 	number: number;
 	htmlUrl: string;
 }
+
+/** SPEC-DEVIATION (ARCHITECTURE.md §11 / DESIGN_SPEC.md §12): repo-creation types, not in the
+ * documented v1 GitHub scope — see github/api.rs's header comment. */
+export interface GithubOrg {
+	login: string;
+	avatarUrl: string;
+}
+
+export interface CreatedGithubRepo {
+	htmlUrl: string;
+	cloneUrl: string;
+}

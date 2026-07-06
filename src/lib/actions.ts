@@ -15,6 +15,7 @@ import { repos } from "$lib/stores/repo.svelte";
 import { network } from "$lib/stores/network.svelte";
 import { credentialDialog } from "$lib/stores/credentialDialog.svelte";
 import { github } from "$lib/stores/github.svelte";
+import { settingsWindow } from "$lib/stores/settingsWindow.svelte";
 
 export interface AppErrorShape {
 	userMessage: string;
@@ -73,6 +74,17 @@ function suggestionAction(err: AppErrorShape, ctx: ErrorContext): ToastAction | 
 				label,
 				run: () => {
 					void openCredentialDialogFor(ctx);
+				},
+			};
+		case "reconnect-github":
+			// SPEC-DEVIATION (error.rs's "refusing to allow an OAuth App ... workflow scope"
+			// branch): the stored token predates requesting `workflow` scope and can't gain it by
+			// itself — sign out so Settings shows "Sign in with GitHub" rather than the already-
+			// connected state, and land the user right there.
+			return {
+				label,
+				run: () => {
+					void github.signOut().then(() => settingsWindow.show("integrations"));
 				},
 			};
 		default:
@@ -352,6 +364,45 @@ export async function publish(repoId: string, name: string): Promise<void> {
 	} finally {
 		repos.setBusy(repoId, false);
 	}
+}
+
+/** SPEC-DEVIATION (ARCHITECTURE.md §11 / DESIGN_SPEC.md §12): creates a brand-new GitHub repo,
+ * wires it up as `origin`, then pushes the current branch in one go — the toolbar Publish button's
+ * "no remote configured, but GitHub is connected" case. Not in the documented v1 GitHub scope; see
+ * github/api.rs's header comment for why this was added anyway. Repo creation and the git push are
+ * kept as two visible steps (rather than one opaque backend call) so a failure after the repo
+ * exists — e.g. the push itself fails — doesn't leave the user unsure what happened; the repo is
+ * already there and `retry` just re-runs the push half. */
+export async function createGithubRepoAndPublish(
+	repoId: string,
+	owner: string | null,
+	name: string,
+	isPrivate: boolean,
+	branch: string,
+): Promise<void> {
+	repos.setBusy(repoId, true);
+	let created: Awaited<ReturnType<typeof ipc.createGithubRepo>>;
+	try {
+		created = await ipc.createGithubRepo(owner, name, isPrivate);
+	} catch (e) {
+		repos.setBusy(repoId, false);
+		const { userMessage, raw } = asAppError(e);
+		toasts.pushError(userMessage, raw);
+		return;
+	}
+	try {
+		await ipc.addRemote(repoId, "origin", created.cloneUrl);
+	} catch (e) {
+		repos.setBusy(repoId, false);
+		const { userMessage, raw } = asAppError(e);
+		toasts.pushError(userMessage, raw, {
+			label: "Open on GitHub",
+			run: () => void ipc.openInBrowser(created!.htmlUrl),
+		});
+		return;
+	}
+	repos.setBusy(repoId, false);
+	await publish(repoId, branch);
 }
 
 /** Opens the Create-PR panel prefilled with `head` — the Publish toast's action and the PULL

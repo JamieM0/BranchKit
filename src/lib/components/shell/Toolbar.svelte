@@ -18,6 +18,9 @@
 	import { appSettings } from "$lib/stores/appSettings.svelte";
 	import { settingsWindow } from "$lib/stores/settingsWindow.svelte";
 	import { isMac } from "$lib/platform";
+	import { github } from "$lib/stores/github.svelte";
+	import { repos } from "$lib/stores/repo.svelte";
+	import type { GithubOrg } from "$lib/types";
 
 	/** The full toolbar sync/action cluster — DESIGN_SPEC.md §3.2:
 	 * `[Pull ▾(badge ↓m)] [Push/Publish (badge ↑n)] [Branch] [Stash ▾] [Pop] ··· [⌘K]`. Repo/branch
@@ -57,6 +60,10 @@
 		);
 	});
 	const hasRemote = $derived(remotes.length > 0);
+	/** SPEC-DEVIATION (ARCHITECTURE.md §11 / DESIGN_SPEC.md §12): with no remote at all, Publish used
+	 * to just be disabled (git has nothing to push to). If GitHub is connected, offer to create a
+	 * fresh GitHub repo and publish to it in one go instead of leaving the button dead. */
+	const canCreateGithubRepo = $derived(!hasRemote && github.connected);
 
 	let pullMenuOpen = $state(false);
 	let pushMenuOpen = $state(false);
@@ -66,11 +73,18 @@
 	let forceArmed = $state(false);
 	let forceArmTimer: ReturnType<typeof setTimeout> | undefined;
 
+	let createRepoOpen = $state(false);
+	let createRepoName = $state("");
+	let createRepoPrivate = $state(true);
+	let createRepoOwner = $state<string | null>(null); // null = signed-in user's personal account
+	let orgs = $state<GithubOrg[]>([]);
+
 	function closeMenus() {
 		pullMenuOpen = false;
 		pushMenuOpen = false;
 		stashMenuOpen = false;
 		stashMessageOpen = false;
+		createRepoOpen = false;
 		clearTimeout(forceArmTimer);
 		forceArmed = false;
 	}
@@ -139,7 +153,37 @@
 	function doPushOrPublish() {
 		if (!branch) return;
 		if (hasUpstream) void run(() => actions.push(repoId, false, branch));
+		else if (canCreateGithubRepo) openCreateRepoDialog();
 		else void run(() => actions.publish(repoId, branch));
+	}
+
+	/** Opens the "create a GitHub repo & publish" dialog — SPEC-DEVIATION, see `canCreateGithubRepo`
+	 * above and github/api.rs's header comment. Prefills the repo name from the local folder name
+	 * (same convention as `nameFromPath`, since that's already what the tab title shows) and loads
+	 * the signed-in user's orgs for the owner picker. */
+	function openCreateRepoDialog() {
+		pullMenuOpen = false;
+		pushMenuOpen = false;
+		stashMenuOpen = false;
+		createRepoName = repos.tabs.find((t) => t.id === repoId)?.name ?? "";
+		createRepoPrivate = true;
+		createRepoOwner = null;
+		createRepoOpen = true;
+		orgs = [];
+		void ipc.listGithubOrgs().then(
+			(o) => (orgs = o),
+			() => (orgs = []), // Org list is a nice-to-have; personal account still works without it.
+		);
+	}
+
+	function submitCreateRepo() {
+		if (!branch) return;
+		const name = createRepoName.trim();
+		if (!name) return;
+		const owner = createRepoOwner;
+		const isPrivate = createRepoPrivate;
+		closeMenus();
+		void actions.createGithubRepoAndPublish(repoId, owner, name, isPrivate, branch);
 	}
 
 	function doForcePush() {
@@ -149,7 +193,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-{#if pullMenuOpen || pushMenuOpen || stashMenuOpen || stashMessageOpen}
+{#if pullMenuOpen || pushMenuOpen || stashMenuOpen || stashMessageOpen || createRepoOpen}
 	<div class="scrim" onclick={closeMenus}></div>
 {/if}
 
@@ -187,9 +231,11 @@
 			<button
 				type="button"
 				class="primary"
-				disabled={!hasUpstream && !hasRemote}
+				disabled={!hasUpstream && !hasRemote && !canCreateGithubRepo}
 				title={!hasUpstream && !hasRemote
-					? "No remote configured — add one first (e.g. git remote add origin <url>)"
+					? canCreateGithubRepo
+						? "Create a GitHub repo and publish this branch to it"
+						: "No remote configured — add one first (e.g. git remote add origin <url>)"
 					: hasUpstream
 						? "Push to upstream"
 						: "Publish this branch to the remote"}
@@ -213,6 +259,43 @@
 						</button>
 					</div>
 				{/if}
+			{/if}
+			{#if createRepoOpen}
+				<div class="menu create-repo-menu" role="menu">
+					<label class="field">
+						<span>Repository name</span>
+						<input
+							type="text"
+							bind:value={createRepoName}
+							autofocus
+							onkeydown={(e) => e.key === "Enter" && submitCreateRepo()}
+						/>
+					</label>
+					<label class="field">
+						<span>Owner</span>
+						<select bind:value={createRepoOwner}>
+							<option value={null}>{github.user?.login ?? "Your account"} (personal)</option>
+							{#each orgs as org (org.login)}
+								<option value={org.login}>{org.login}</option>
+							{/each}
+						</select>
+					</label>
+					<label class="checkbox-field">
+						<input type="checkbox" bind:checked={createRepoPrivate} />
+						Private repository
+					</label>
+					<div class="message-actions">
+						<button type="button" onclick={closeMenus}>Cancel</button>
+						<button
+							type="button"
+							class="primary-small"
+							disabled={!createRepoName.trim()}
+							onclick={submitCreateRepo}
+						>
+							Create &amp; publish
+						</button>
+					</div>
+				</div>
 			{/if}
 		</div>
 
@@ -527,5 +610,54 @@
 		border-color: var(--accent);
 		color: var(--bg);
 		font-weight: 600;
+	}
+
+	.message-actions .primary-small:disabled {
+		background: var(--raised);
+		border-color: var(--border);
+		color: var(--text-faint);
+		cursor: default;
+	}
+
+	/* SPEC-DEVIATION (ARCHITECTURE.md §11 / DESIGN_SPEC.md §12): the "create GitHub repo & publish"
+	   dialog — see canCreateGithubRepo/openCreateRepoDialog in the script. Styled to match the
+	   existing stash-message menu rather than introducing a new pattern. */
+	.create-repo-menu {
+		gap: var(--space-2);
+		padding: var(--space-2);
+		min-width: 260px;
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		font-size: 11px;
+		color: var(--text-muted);
+	}
+
+	.field input,
+	.field select {
+		padding: 4px var(--space-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-control);
+		background: var(--surface);
+		color: var(--text);
+		font: inherit;
+		font-size: 12px;
+	}
+
+	.field input:focus,
+	.field select:focus {
+		outline: none;
+		border-color: var(--accent);
+	}
+
+	.checkbox-field {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 12px;
+		color: var(--text);
 	}
 </style>

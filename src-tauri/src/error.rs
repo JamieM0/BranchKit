@@ -128,6 +128,18 @@ fn translate(stderr: &str) -> Option<(String, Suggestion)> {
             Suggestion::new("Retry", "retry"),
         ));
     }
+    // Must be checked before the generic auth-failure branch below: this isn't a bad-credential
+    // problem (the username/password dialog can't fix it), it's a missing OAuth scope — GitHub
+    // hard-rejects any push that touches `.github/workflows/*` unless the token has `workflow`
+    // scope (github/mod.rs's SPEC-DEVIATION comment). Tokens issued before that fix was added
+    // don't gain the scope retroactively, so the fix is reconnecting, not re-entering a password.
+    if lower.contains("refusing to allow an oauth app") && lower.contains("workflow") {
+        return Some((
+            "GitHub needs an extra permission to push changes to this repo's workflow files"
+                .to_string(),
+            Suggestion::new("Reconnect GitHub", "reconnect-github"),
+        ));
+    }
     if lower.contains("authentication failed") || lower.contains("403") {
         return Some((
             "GitHub rejected your credentials".to_string(),
@@ -234,6 +246,20 @@ mod tests {
         let err: AppError =
             git_error("fatal: Unable to create '/repo/.git/index.lock': File exists.").into();
         assert_eq!(err.suggestion.as_ref().unwrap().action_id, "retry");
+    }
+
+    #[test]
+    fn maps_missing_workflow_scope_to_reconnect_suggestion() {
+        let err: AppError = git_error(
+            "! [remote rejected] main -> main (refusing to allow an OAuth App to create or update \
+             workflow `.github/workflows/release.yml` without `workflow` scope)\n\
+             error: failed to push some refs to 'https://github.com/o/r.git'",
+        )
+        .into();
+        assert_eq!(
+            err.suggestion.as_ref().unwrap().action_id,
+            "reconnect-github"
+        );
     }
 
     #[test]

@@ -593,6 +593,28 @@ pub async fn list_remotes(
         .collect())
 }
 
+/// `git remote add <name> <url>` — the counterpart to `list_remotes`'s "no remote" check. Used by
+/// the GitHub "create repo & publish" flow (ARCHITECTURE.md §11, SPEC-DEVIATION: §11 only scoped
+/// six read/PR endpoints, this adds repo creation) once a fresh GitHub repo exists but the local
+/// repo has nothing to push to yet. Errors (e.g. `name` already configured) surface as-is — git's
+/// own message is clear enough here.
+#[tauri::command]
+pub async fn add_remote(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+    name: String,
+    url: String,
+) -> Result<(), AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    handle.begin_self_op(&[WatchedKind::Remote]);
+    let result = git(&handle.path, &["remote", "add", &name, &url], GitOpts::default()).await;
+    emit_changes(&app, &repo_id, &[ChangeKind::Remote]);
+    result?;
+    Ok(())
+}
+
 /// Appends `pattern` as a new line to the repo root's `.gitignore` (creating it if needed) — the
 /// file row menu's Ignore submenu (this file / by extension / folder, GITKRAKEN_WORKFLOWS.md
 /// §2.9/§3.4). A no-op (no watcher suppression needed beyond WorkingTree) when the pattern is

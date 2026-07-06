@@ -11,6 +11,7 @@ import type {
   CommitCheckStatus,
   CommitMeta,
   ConflictState,
+  CreatedGithubRepo,
   CreatedPr,
   CredentialInfo,
   DeviceCode,
@@ -21,6 +22,7 @@ import type {
   FileHistoryEntry,
   GeneratedCommitMessage,
   GitIdentity,
+  GithubOrg,
   GithubUser,
   GraphTopologyRow,
   LocalDownloadProgress,
@@ -266,6 +268,10 @@ export async function getRemoteUrl(repoId: string, remote: string): Promise<stri
 /** Configured remote names — drives the toolbar's Publish disabled state on remote-less repos. */
 export async function listRemotes(repoId: string): Promise<string[]> {
   return invoke("list_remotes", { repoId });
+}
+
+export async function addRemote(repoId: string, name: string, url: string): Promise<void> {
+  return invoke("add_remote", { repoId, name, url });
 }
 
 export async function ignorePath(repoId: string, pattern: string): Promise<void> {
@@ -635,6 +641,20 @@ export async function mergePullRequest(
  * the local branch name it created (`pr-<n>`). */
 export async function checkoutPrHead(repoId: string, number: number): Promise<string> {
   return invoke("checkout_pr_head", { repoId, number });
+}
+
+/** SPEC-DEVIATION (ARCHITECTURE.md §11 / DESIGN_SPEC.md §12): create-a-GitHub-repo support for
+ * publishing repos with no origin — not in the documented v1 scope, see github/api.rs's header. */
+export async function listGithubOrgs(): Promise<GithubOrg[]> {
+  return invoke("list_orgs");
+}
+
+export async function createGithubRepo(
+  owner: string | null,
+  name: string,
+  isPrivate: boolean,
+): Promise<CreatedGithubRepo> {
+  return invoke("create_repo", { owner, name, private: isPrivate });
 }
 
 // --- AI (ARCHITECTURE.md §10, DESIGN_SPEC.md §7/§13) ---

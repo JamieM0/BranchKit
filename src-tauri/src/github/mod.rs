@@ -78,7 +78,13 @@ pub async fn start_device_flow() -> Result<DeviceCode, AppError> {
     let resp = client()
         .post(DEVICE_CODE_URL)
         .header("Accept", "application/json")
-        .form(&[("client_id", client_id), ("scope", "repo")])
+        // SPEC-DEVIATION (ARCHITECTURE.md §11 says `scope repo`): also request `workflow`. Without
+        // it, GitHub hard-rejects any push (OAuth App or not) that adds/updates a file under
+        // `.github/workflows/` with "refusing to allow an OAuth App to create or update workflow
+        // ... without `workflow` scope" — every repo with CI hits this on Publish/push, not just
+        // the new create-repo flow. Existing tokens issued before this change don't gain the new
+        // scope retroactively; signed-in users need to sign out and back in once.
+        .form(&[("client_id", client_id), ("scope", "repo workflow")])
         .send()
         .await?
         .error_for_status()?

@@ -1,7 +1,12 @@
-//! GitHub REST calls — ARCHITECTURE.md §11. Six endpoints, plain `reqwest` + serde structs (no
-//! octocrab, per ARCHITECTURE's "fewer deps, we need 6 endpoints"): current user, list PRs,
-//! check-runs + combined status, create PR, merge PR; PR-head checkout is a git fetch, not a REST
-//! call, and lives at the bottom of this file since it still needs the repo's op queue.
+//! GitHub REST calls — ARCHITECTURE.md §11. Originally six endpoints, plain `reqwest` + serde
+//! structs (no octocrab, per ARCHITECTURE's "fewer deps, we need 6 endpoints"): current user, list
+//! PRs, check-runs + combined status, create PR, merge PR; PR-head checkout is a git fetch, not a
+//! REST call, and lives further down since it still needs the repo's op queue.
+//!
+//! SPEC-DEVIATION (ARCHITECTURE.md §11 / DESIGN_SPEC.md §12 "v1 scope"): two more endpoints below
+//! — `list_orgs` and `create_repo` — back "publish an unpublished repo straight to a new GitHub
+//! repo" (Jamie's request). Neither doc mentions repo creation; this is a deliberate scope add,
+//! not an oversight. Same auth/rate-limit rules as the rest of this file apply.
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -51,6 +56,79 @@ pub(super) async fn fetch_current_user(token: &str) -> Result<GithubUser, AppErr
     Ok(GithubUser {
         login: resp["login"].as_str().unwrap_or_default().to_string(),
         avatar_url: resp["avatar_url"].as_str().unwrap_or_default().to_string(),
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubOrg {
+    pub login: String,
+    pub avatar_url: String,
+}
+
+/// Orgs the signed-in user belongs to — the "create repo" dialog's owner picker (personal account
+/// vs. an org), SPEC-DEVIATION per this file's header. `GET /user/orgs` covers the common case;
+/// orgs a user belongs to but that hide membership from this endpoint just won't show up as a
+/// choice, which is an acceptable v1 gap rather than a bug.
+#[tauri::command]
+pub async fn list_orgs() -> Result<Vec<GithubOrg>, AppError> {
+    let token = auth_token()?;
+    let resp: Vec<serde_json::Value> = authed(client().get(format!("{API_BASE}/user/orgs")), &token)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+        .map_err(|e| AppError::new("Could not read your GitHub organizations", e.to_string()))?;
+
+    Ok(resp
+        .into_iter()
+        .map(|o| GithubOrg {
+            login: o["login"].as_str().unwrap_or_default().to_string(),
+            avatar_url: o["avatar_url"].as_str().unwrap_or_default().to_string(),
+        })
+        .collect())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedGithubRepo {
+    pub html_url: String,
+    /// HTTPS clone URL — `credentials.rs` already special-cases `github.com` to answer the git
+    /// credential helper with the signed-in OAuth token (see `github.com` branch there), so this
+    /// works as `origin` immediately without any extra credential setup.
+    pub clone_url: String,
+}
+
+/// Creates a new GitHub repository and returns its clone URL — the "publish an unpublished repo"
+/// flow's first step (SPEC-DEVIATION per this file's header). `owner` is `None` for the signed-in
+/// user's personal account, or an org login from `list_orgs`. Caller is responsible for then
+/// `git remote add origin <cloneUrl>` and pushing — this command only talks to GitHub.
+#[tauri::command]
+pub async fn create_repo(
+    owner: Option<String>,
+    name: String,
+    private: bool,
+) -> Result<CreatedGithubRepo, AppError> {
+    let token = auth_token()?;
+    let url = match &owner {
+        Some(org) if !org.is_empty() => format!("{API_BASE}/orgs/{org}/repos"),
+        _ => format!("{API_BASE}/user/repos"),
+    };
+
+    let resp: serde_json::Value = authed(client().post(url), &token)
+        .json(&serde_json::json!({ "name": name, "private": private }))
+        .send()
+        .await?
+        .error_for_status()
+        .map_err(|e| AppError::new("GitHub couldn't create that repository", e.to_string()))?
+        .json()
+        .await
+        .map_err(|e| AppError::new("Could not read GitHub's response", e.to_string()))?;
+
+    Ok(CreatedGithubRepo {
+        html_url: resp["html_url"].as_str().unwrap_or_default().to_string(),
+        clone_url: resp["clone_url"].as_str().unwrap_or_default().to_string(),
     })
 }
 
