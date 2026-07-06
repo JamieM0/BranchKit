@@ -4,8 +4,8 @@
 
 **A git client that makes the hard parts feel easy.**
 
-Merge conflicts you resolve by pointing and clicking. A commit graph you
-manipulate directly. Safety nets instead of scary dialogs.
+Merge conflicts you resolve by pointing and clicking, a commit graph you
+manipulate directly, and safe action buttons rather than memorising commands.
 
 Free · open source · cross-platform — with no accounts, telemetry, or upsells.
 
@@ -21,7 +21,8 @@ Free · open source · cross-platform — with no accounts, telemetry, or upsell
 
 <div align="center">
 
-![Resolving a merge conflict in the Keep Panel](docs/keep-panel-demo.gif)
+![The Keep Panel showing two candidate blocks labelled by branch](docs/keep-panel.png)
+
 
 <em>Resolving a merge conflict by choosing what to keep — no diff markers, no hand-editing.</em>
 
@@ -30,36 +31,32 @@ Free · open source · cross-platform — with no accounts, telemetry, or upsell
 ## Why BranchKit
 
 Most git tools put git's complexity in front of you and expect you to manage it.
-BranchKit hides it. The operations people usually dread — resolving conflicts,
-rebasing, recovering from a mistake — become things you do by pointing, clicking,
+BranchKit manages the hard part for you. The operations people usually dread — resolving conflicts,
+rebasing, recovering from a mistake — become effortless by pointing, clicking,
 and dragging, with the tool watching your back.
 
-It's built for people who want git to get out of the way, not for people who enjoy
-memorizing flags.
+It's built for people who want to focus on building and get git out of the way, not for power users who enjoy tinkering with git.
 
-## Conflicts as choices, not marker soup
+## Conflicts as choices
 
-Conflict resolution is the part of git that scares people most, so it's the part
-BranchKit works hardest to simplify. The **Keep Panel** replaces the usual wall of
-`<<<<<<<` markers with a single, readable view of the file you're building.
+Conflict resolution is the most common "complex" part of git, so it's the part
+BranchKit works hardest to simplify. The **Keep Panel** replaces the usual "theirs" and "ours" with a single, readable view of the file you're building.
 
 <div align="center">
 
-![The Keep Panel showing two candidate blocks labelled by branch](docs/keep-panel.png)
+![Resolving a merge conflict in the Keep Panel](docs/keep-panel-demo.gif)
 
 </div>
 
 Each side of a conflict is a labelled block with its real branch name — *yours* and
-*incoming*, not "ours" and "theirs" you have to decode. You **keep** a side with one
-click, or keep both and they stack in the order you click them. Lines renumber live as
+*incoming*. You **keep** a side with one click, or keep both and they stack in the order you click them. Lines renumber live as
 you go, you can keep individual lines, and there's a hand-edit escape hatch when you
 need it — all fully keyboard-drivable. The same panel handles merge, rebase,
 cherry-pick, revert, and stash conflicts, so there's one thing to learn instead of five.
 
 ## The graph is the workbench
 
-The commit graph isn't just a picture of history — it's how you *do* things. Drag one
-branch onto another to merge, rebase, or fast-forward. Double-click a remote branch to
+The commit graph is how you *do* things. Drag onebranch onto another to merge, rebase, or fast-forward. Double-click a remote branch to
 create a tracking branch and check it out in a single gesture. Stashes live right in the
 graph, unpushed commits wear a dashed halo so you can see what's local at a glance, and
 the top row doubles as your commit message editor.
@@ -77,10 +74,11 @@ recoverable for 7 days. Force-pushes use `--force-with-lease` only. Amending a p
 commit warns you first. When something does go wrong, errors are written in plain
 language with a suggested fix — not raw git output you have to interpret.
 
+Basically, BranchKit's got your back every step of the way.
+
 ## Everything else, kept simple
 
-- **Staging that stays out of your way.** Stage by file, hunk, or single line; `Space`
-  walks the list; discards stay recoverable.
+- **Staging that stays out of your way.** Stage by file, hunk, or single line; walk the list using 'Space'; discards stay recoverable.
 - **AI commit messages, local-first and optional.** Use the in-app managed local model
   (llama.cpp), your own Ollama, or any OpenAI-/Anthropic-format endpoint. Keys live in
   the OS keychain, never in a config file.
@@ -127,4 +125,4 @@ and lint commands above pass on your change.
 ## License
 
 [AGPL-3.0](LICENSE). BranchKit is an independent project, not affiliated with, endorsed by,
-or connected to GitKraken or Axosoft, LLC.
+or connected to any other git client, or developers of any other git client.
