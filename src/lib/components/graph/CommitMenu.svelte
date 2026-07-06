@@ -86,7 +86,7 @@
 						items: [
 							{ type: "action", label: "Soft (keep changes staged)", run: () => run(() => actions.resetTo(repoId, sha, "soft")) },
 							{ type: "action", label: "Mixed (keep changes unstaged)", run: () => run(() => actions.resetTo(repoId, sha, "mixed")) },
-							{ type: "action", label: "Hard (discard changes)…", danger: true, run: startResetHard },
+							{ type: "action", label: "Hard (discard changes)…", danger: true, keepOpen: true, run: startResetHard },
 						],
 					},
 				] satisfies MenuItem[])
@@ -96,6 +96,7 @@
 		{
 			type: "action",
 			label: "Create tag here…",
+			keepOpen: true,
 			run: () => {
 				mode = "tag";
 			},
@@ -103,6 +104,7 @@
 		{
 			type: "action",
 			label: "Create annotated tag here…",
+			keepOpen: true,
 			run: () => {
 				mode = "annotatedTag";
 			},

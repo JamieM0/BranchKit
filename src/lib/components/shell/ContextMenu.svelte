@@ -14,6 +14,9 @@
 				shortcut?: string;
 				danger?: boolean;
 				disabledReason?: string;
+				/** Skip the auto-dismiss so `run` can swap the menu for inline UI (e.g. a follow-up
+				 * form) instead of the whole menu unmounting out from under it. */
+				keepOpen?: boolean;
 				run: () => void | Promise<void>;
 		  }
 		| { type: "submenu"; label: string; disabledReason?: string; items: MenuItem[] }
@@ -69,7 +72,7 @@
 
 	function runAction(item: Extract<MenuItem, { type: "action" }>) {
 		if (item.disabledReason) return;
-		onDismiss();
+		if (!item.keepOpen) onDismiss();
 		void item.run();
 	}
 </script>
