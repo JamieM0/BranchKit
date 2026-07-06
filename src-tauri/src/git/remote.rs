@@ -117,8 +117,10 @@ pub async fn pull(
 
 /// Push the current branch to its upstream — the badge popover's Push / Force push actions. Force
 /// is **always `--force-with-lease`**, never `--force` (ARCHITECTURE.md §7.1). When the
-/// `push_tags_with_commits` Git setting is on, `--follow-tags` is appended so annotated tags
-/// reachable from the pushed commits go along (GITKRAKEN_WORKFLOWS.md §2.9 "push tags on push").
+/// `push_tags_with_commits` Git setting is on, `--tags` is appended so every local tag goes with
+/// the push (GITKRAKEN_WORKFLOWS.md §2.9 "push tags on push") — `--follow-tags` was tried first
+/// but it silently skips lightweight tags and any tag whose target commit is already on the
+/// remote, neither of which matches the setting's plain-English promise.
 #[tauri::command]
 pub async fn push(
     app: AppHandle,
@@ -134,7 +136,7 @@ pub async fn push(
         args.push("--force-with-lease");
     }
     if settings::get_settings(app.clone())?.git.push_tags_with_commits {
-        args.push("--follow-tags");
+        args.push("--tags");
     }
     let helper = credentials::helper_config_args();
     let result = git_with_progress(
@@ -165,7 +167,7 @@ pub async fn publish(
     let mut args = vec!["push", "--progress", "-u", "origin"];
     let push_tags = settings::get_settings(app.clone())?.git.push_tags_with_commits;
     if push_tags {
-        args.push("--follow-tags");
+        args.push("--tags");
     }
     args.push(&name);
     let helper = credentials::helper_config_args();
