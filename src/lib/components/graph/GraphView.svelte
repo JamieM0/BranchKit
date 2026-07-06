@@ -477,6 +477,12 @@
 	}
 
 	function onKeydown(e: KeyboardEvent) {
+		// Don't hijack keys while typing in a field inside the graph (e.g. the WIP commit input) —
+		// otherwise j/k get eaten as vim-style navigation and never reach the input.
+		const target = e.target as HTMLElement | null;
+		if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+			return;
+		}
 		const key = e.key;
 		if (key === "ArrowDown" || key === "j") {
 			e.preventDefault();

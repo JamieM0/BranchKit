@@ -202,8 +202,8 @@ export async function pull(repoId: string, mode: "ff" | "rebase" | "merge"): Pro
   return invoke("pull", { repoId, mode });
 }
 
-export async function push(repoId: string, force: boolean): Promise<void> {
-  return invoke("push", { repoId, force });
+export async function push(repoId: string, force: boolean, branch: string): Promise<void> {
+  return invoke("push", { repoId, force, branch });
 }
 
 /** Push a branch with no upstream yet, setting `origin/<name>` as its tracking ref in one action —

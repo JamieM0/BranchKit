@@ -329,7 +329,7 @@ export async function pull(
 export async function push(repoId: string, force: boolean, branch: string): Promise<void> {
 	repos.setBusy(repoId, true);
 	try {
-		await ipc.push(repoId, force);
+		await ipc.push(repoId, force, branch);
 		network.markOnline();
 		toasts.push({
 			message: force ? `Force-pushed \`${branch}\`` : `Pushed \`${branch}\``,
