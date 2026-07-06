@@ -96,8 +96,12 @@ fn parse_track(track: &str) -> (u32, u32, bool) {
 }
 
 pub async fn list_refs(repo: &Path) -> Result<Vec<RefInfo>, GitError> {
+    // `%(*objectname)` is the peeled/dereferenced sha — needed for annotated tags, whose
+    // `%(objectname)` is the tag *object*'s own sha rather than the commit it points at. It's
+    // empty for branches, remote branches, and lightweight tags, so we fall back to
+    // `%(objectname)` for those.
     let format = format!(
-        "--format=%(refname){UNIT_SEP}%(objectname){UNIT_SEP}%(upstream:short){UNIT_SEP}%(upstream:track){UNIT_SEP}%(HEAD)"
+        "--format=%(refname){UNIT_SEP}%(objectname){UNIT_SEP}%(*objectname){UNIT_SEP}%(upstream:short){UNIT_SEP}%(upstream:track){UNIT_SEP}%(HEAD)"
     );
     let output = git(
         repo,
@@ -118,12 +122,18 @@ pub async fn list_refs(repo: &Path) -> Result<Vec<RefInfo>, GitError> {
         if line.is_empty() {
             continue;
         }
-        let mut fields = line.splitn(5, UNIT_SEP);
+        let mut fields = line.splitn(6, UNIT_SEP);
         let name = fields.next().unwrap_or_default().to_string();
         let Some((kind, short_name)) = classify(&name) else {
             continue;
         };
-        let sha = fields.next().unwrap_or_default().to_string();
+        let object_sha = fields.next().unwrap_or_default().to_string();
+        let peeled_sha = fields.next().unwrap_or_default();
+        let sha = if peeled_sha.is_empty() {
+            object_sha
+        } else {
+            peeled_sha.to_string()
+        };
         let upstream_short = fields.next().unwrap_or_default();
         let upstream = if upstream_short.is_empty() {
             None

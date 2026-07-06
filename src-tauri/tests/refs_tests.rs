@@ -32,6 +32,25 @@ async fn lists_branches_and_tags_with_head_marker() {
 }
 
 #[tokio::test]
+async fn annotated_tag_sha_resolves_to_commit_not_tag_object() {
+    let repo = TestRepo::init().await;
+    repo.write("a.txt", "one\n");
+    let sha = repo.commit_all("first").await;
+    repo.run(&["tag", "-a", "v1.0.0", "-m", "release"]).await;
+
+    let refs = refs::list_refs(repo.path()).await.expect("list_refs");
+    let tag = refs
+        .iter()
+        .find(|r| r.short_name == "v1.0.0")
+        .expect("annotated tag");
+    assert_eq!(tag.kind, RefKind::Tag);
+    assert_eq!(
+        tag.sha, sha,
+        "annotated tag must resolve to the peeled commit sha, not the tag object sha"
+    );
+}
+
+#[tokio::test]
 async fn ahead_behind_computed_from_upstream_track() {
     let repo = TestRepo::init().await;
     repo.write("a.txt", "one\n");
