@@ -221,9 +221,21 @@
 		return section === "unstaged" ? "Stage" : "Unstage";
 	}
 
+	function isEditableTarget(e: KeyboardEvent): boolean {
+		const t = e.target;
+		if (!(t instanceof HTMLElement)) return false;
+		return (
+			t instanceof HTMLInputElement ||
+			t instanceof HTMLTextAreaElement ||
+			t.isContentEditable
+		);
+	}
+
 	/** Space stages/unstages the keyboard-selected row (§15.10); ArrowUp/Down move the selection
-	 * within its own section. */
+	 * within its own section. Bails out for editable targets (e.g. the commit message textarea in
+	 * CommitComposer, which is nested inside this panel) so typing a space doesn't get hijacked. */
 	function onKeydown(e: KeyboardEvent) {
+		if (isEditableTarget(e)) return;
 		if (e.key === " " || e.key === "Spacebar") {
 			if (!selectedPath || !selectedSection) return;
 			e.preventDefault();

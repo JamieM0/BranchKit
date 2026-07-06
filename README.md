@@ -1,38 +1,102 @@
+<div align="center">
+
+<img src="src-tauri/icons/128x128@2x.png" width="88" alt="BranchKit logo" />
+
 # BranchKit
 
-BranchKit is a free, open-source, cross-platform git client for macOS, Windows, and Linux,
-built with Tauri and Svelte. It's inspired by GitKraken's graph-first workflow — a
-click-and-drag commit graph, an in-app conflict resolver (the Keep Panel), safety nets instead
-of scary confirm dialogs, and a command palette — without accounts, telemetry, or upsells.
+**A git client that makes the hard parts feel easy.**
 
-![BranchKit screenshot placeholder](docs/screenshot-placeholder.png)
+Merge conflicts you resolve by pointing and clicking. A commit graph you
+manipulate directly. Safety nets instead of scary dialogs.
 
-## Features
+Free · open source · cross-platform — with no accounts, telemetry, or upsells.
 
-- **Commit graph as the workbench.** Virtualized canvas graph, smooth at 20k+ commits. Local
-  and remote branches inline with presence icons; double-click a remote branch to create a
-  tracking branch and check it out in one gesture; drag a branch onto another to
-  merge/rebase/fast-forward; stashes live in the graph; the WIP row is your commit message
-  editor; unpushed commits wear a dashed halo.
-- **The Keep Panel.** Conflicts as choices, not marker soup: one panel showing the future
-  file, candidate blocks labeled with real branch names, keep/unkeep with live line
-  renumbering, keep-both in click order, per-line keeps, a hand-edit escape hatch, full
-  keyboard control. Works for merge, rebase, cherry-pick, revert and stash conflicts.
-- **Staging done right.** Per-file, per-hunk, per-line staging; Space walks the list; every
-  discard is recoverable for 7 days.
-- **Sync without fear.** Clickable ahead/behind badges, `--force-with-lease` only,
-  pushed-amend warnings, and human-language errors with suggested fixes.
-- **GitHub, optional.** Device-flow sign-in, PR panel, create/merge/checkout PRs, CI dots.
-- **AI commit messages, local-first and optional.** In-app-managed local model (llama.cpp),
-  or your own Ollama, or any OpenAI-/Anthropic-format endpoint. Keys live in the OS keychain.
-- Multi-repo tabs, worktrees, file history + blame, ⌘K palette, dark + light themes.
+<br />
+
+![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-2ea44f?style=flat-square)
+![Platforms](https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux-1f2328?style=flat-square)
+![Built with Tauri + Svelte](https://img.shields.io/badge/Tauri%202%20·%20Svelte%205-1f2328?style=flat-square)
+
+</div>
+
+<br />
+
+<div align="center">
+
+![Resolving a merge conflict in the Keep Panel](docs/keep-panel-demo.gif)
+
+<em>Resolving a merge conflict by choosing what to keep — no diff markers, no hand-editing.</em>
+
+</div>
+
+## Why BranchKit
+
+Most git tools put git's complexity in front of you and expect you to manage it.
+BranchKit hides it. The operations people usually dread — resolving conflicts,
+rebasing, recovering from a mistake — become things you do by pointing, clicking,
+and dragging, with the tool watching your back.
+
+It's built for people who want git to get out of the way, not for people who enjoy
+memorizing flags.
+
+## Conflicts as choices, not marker soup
+
+Conflict resolution is the part of git that scares people most, so it's the part
+BranchKit works hardest to simplify. The **Keep Panel** replaces the usual wall of
+`<<<<<<<` markers with a single, readable view of the file you're building.
+
+<div align="center">
+
+![The Keep Panel showing two candidate blocks labelled by branch](docs/keep-panel.png)
+
+</div>
+
+Each side of a conflict is a labelled block with its real branch name — *yours* and
+*incoming*, not "ours" and "theirs" you have to decode. You **keep** a side with one
+click, or keep both and they stack in the order you click them. Lines renumber live as
+you go, you can keep individual lines, and there's a hand-edit escape hatch when you
+need it — all fully keyboard-drivable. The same panel handles merge, rebase,
+cherry-pick, revert, and stash conflicts, so there's one thing to learn instead of five.
+
+## The graph is the workbench
+
+The commit graph isn't just a picture of history — it's how you *do* things. Drag one
+branch onto another to merge, rebase, or fast-forward. Double-click a remote branch to
+create a tracking branch and check it out in a single gesture. Stashes live right in the
+graph, unpushed commits wear a dashed halo so you can see what's local at a glance, and
+the top row doubles as your commit message editor.
+
+<div align="center">
+
+![BranchKit's commit graph with branches, tags, stashes and worktrees](docs/commit-graph.png)
+
+</div>
+
+## Nothing you do is scary
+
+BranchKit assumes you'll make mistakes and makes them cheap to undo. Every discard is
+recoverable for 7 days. Force-pushes use `--force-with-lease` only. Amending a pushed
+commit warns you first. When something does go wrong, errors are written in plain
+language with a suggested fix — not raw git output you have to interpret.
+
+## Everything else, kept simple
+
+- **Staging that stays out of your way.** Stage by file, hunk, or single line; `Space`
+  walks the list; discards stay recoverable.
+- **AI commit messages, local-first and optional.** Use the in-app managed local model
+  (llama.cpp), your own Ollama, or any OpenAI-/Anthropic-format endpoint. Keys live in
+  the OS keychain, never in a config file.
+- **GitHub, only if you want it.** Device-flow sign-in, a PR panel, create/merge/checkout
+  PRs, and CI status dots — entirely optional.
+- **The rest.** Multi-repo tabs, worktrees, file history and blame, a `⌘K` command
+  palette, and dark + light themes.
 
 ## Install
 
-Download the latest release for your OS from
-[Releases](../../releases): `.dmg` (macOS), `.msi` (Windows), `.AppImage` / `.deb` (Linux).
-Requires git ≥ 2.30 on your PATH. On Linux, secure credential storage uses
-libsecret/gnome-keyring; without it, secrets are kept in memory only for the session.
+Download the latest release for your OS from [Releases](../../releases): `.dmg` (macOS),
+`.msi` (Windows), `.AppImage` / `.deb` (Linux). Requires git ≥ 2.30 on your PATH. On
+Linux, secure credential storage uses libsecret/gnome-keyring; without it, secrets are
+kept in memory for the session only.
 
 ## Building from source
 

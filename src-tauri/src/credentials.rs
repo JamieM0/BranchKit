@@ -229,7 +229,10 @@ pub fn run_credential_helper_cli(op: &str) {
             }
         }
         "store" => {
-            if username.is_empty() || password.is_empty() {
+            // Never store the synthetic `x-access-token` username we inject for OAuth — it's
+            // managed by the GITHUB_ACCOUNT keychain entry; caching it here causes sign-out +
+            // reconnect to keep returning a stale token from the host-credential path.
+            if username.is_empty() || password.is_empty() || username == "x-access-token" {
                 return;
             }
             let _ = set_host_credential(&host, &username, &password);

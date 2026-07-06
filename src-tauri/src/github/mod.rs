@@ -205,6 +205,9 @@ pub fn get_github_connection(app: AppHandle) -> Option<GithubUser> {
 #[tauri::command]
 pub fn github_sign_out(app: AppHandle) {
     credentials::delete_secret(credentials::GITHUB_ACCOUNT);
+    // Also remove any stale host credential that git's `store` call may have cached under the
+    // synthetic `x-access-token` username before the store handler learned to skip it.
+    credentials::remove_host_credential("github.com", "x-access-token");
     save_cached_user(&app, None);
 }
 
