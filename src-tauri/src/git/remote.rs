@@ -23,6 +23,7 @@ use crate::state::{AppState, RepoHandle};
 
 use super::exec::{git_with_progress, GitOpts};
 use super::ops::{emit_changes, require_repo};
+use super::refs;
 
 /// Prepends the credential-helper `-c` args (ARCHITECTURE.md §8) to a network command's argument
 /// list — they must come before the git subcommand name.
@@ -120,7 +121,9 @@ pub async fn pull(
 /// `push_tags_with_commits` Git setting is on, `--tags` is appended so every local tag goes with
 /// the push (GITKRAKEN_WORKFLOWS.md §2.9 "push tags on push") — `--follow-tags` was tried first
 /// but it silently skips lightweight tags and any tag whose target commit is already on the
-/// remote, neither of which matches the setting's plain-English promise.
+/// remote, neither of which matches the setting's plain-English promise. When `--tags` is used we
+/// also have to name the branch explicitly: `git push --tags` with no refspec pushes *only* tags
+/// and silently skips the branch, which looks like "Push did nothing".
 #[tauri::command]
 pub async fn push(
     app: AppHandle,
@@ -131,11 +134,22 @@ pub async fn push(
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
     handle.begin_self_op(&[WatchedKind::Refs, WatchedKind::Remote]);
+    let push_tags = settings::get_settings(app.clone())?.git.push_tags_with_commits;
+    // Resolved up front so the borrow lives long enough to feed `args: Vec<&str>` below.
+    let head_branch = if push_tags {
+        refs::head_info(&handle.path).await.ok().and_then(|h| h.branch)
+    } else {
+        None
+    };
     let mut args = vec!["push", "--progress"];
     if force {
         args.push("--force-with-lease");
     }
-    if settings::get_settings(app.clone())?.git.push_tags_with_commits {
+    if let Some(branch) = &head_branch {
+        args.push("origin");
+        args.push(branch.as_str());
+    }
+    if push_tags {
         args.push("--tags");
     }
     let helper = credentials::helper_config_args();
