@@ -18,6 +18,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::credentials;
 use crate::error::AppError;
 use crate::events::{ChangeKind, WatchedKind};
+use crate::settings;
 use crate::state::{AppState, RepoHandle};
 
 use super::exec::{git_with_progress, GitOpts};
@@ -115,7 +116,9 @@ pub async fn pull(
 }
 
 /// Push the current branch to its upstream — the badge popover's Push / Force push actions. Force
-/// is **always `--force-with-lease`**, never `--force` (ARCHITECTURE.md §7.1).
+/// is **always `--force-with-lease`**, never `--force` (ARCHITECTURE.md §7.1). When the
+/// `push_tags_with_commits` Git setting is on, `--follow-tags` is appended so annotated tags
+/// reachable from the pushed commits go along (GITKRAKEN_WORKFLOWS.md §2.9 "push tags on push").
 #[tauri::command]
 pub async fn push(
     app: AppHandle,
@@ -129,6 +132,9 @@ pub async fn push(
     let mut args = vec!["push", "--progress"];
     if force {
         args.push("--force-with-lease");
+    }
+    if settings::get_settings(app.clone())?.git.push_tags_with_commits {
+        args.push("--follow-tags");
     }
     let helper = credentials::helper_config_args();
     let result = git_with_progress(
@@ -144,7 +150,8 @@ pub async fn push(
 }
 
 /// Push a branch with no upstream yet, setting `origin/<name>` as its tracking ref in the same
-/// action — the toolbar's Push-becomes-**Publish** state (DESIGN_SPEC.md §3.2/§9).
+/// action — the toolbar's Push-becomes-**Publish** state (DESIGN_SPEC.md §3.2/§9). Honors the
+/// `push_tags_with_commits` setting the same way [`push`] does.
 #[tauri::command]
 pub async fn publish(
     app: AppHandle,
@@ -155,10 +162,16 @@ pub async fn publish(
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
     handle.begin_self_op(&[WatchedKind::Refs, WatchedKind::Remote]);
+    let mut args = vec!["push", "--progress", "-u", "origin"];
+    let push_tags = settings::get_settings(app.clone())?.git.push_tags_with_commits;
+    if push_tags {
+        args.push("--follow-tags");
+    }
+    args.push(&name);
     let helper = credentials::helper_config_args();
     let result = git_with_progress(
         &handle.path,
-        &with_credential_helper(&helper, &["push", "--progress", "-u", "origin", &name]),
+        &with_credential_helper(&helper, &args),
         GitOpts::network(),
         progress_emitter(app.clone(), repo_id.clone()),
     )

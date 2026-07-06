@@ -567,6 +567,16 @@ mod tests {
         git(dir, &["config", "commit.gpgsign", "false"], GitOpts::default())
             .await
             .unwrap();
+        // Pin `core.autocrlf=false` so `git restore`/`git reset --hard` round-trip the exact bytes
+        // the test wrote (Windows defaults to `true`, which would re-emit LF as CRLF on checkout
+        // and break the byte-identical assertions below).
+        git(
+            dir,
+            &["config", "core.autocrlf", "false"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
     }
 
     async fn commit_all(dir: &Path, msg: &str) {
