@@ -58,6 +58,7 @@
 		bg: string;
 		surface: string;
 		muted: string;
+		behind: string;
 	}
 
 	let scrollEl: HTMLDivElement | null = $state(null);
@@ -125,6 +126,34 @@
 		return hasRemoteRefs && row.kind === "commit" && !remoteReachable.has(row.sha);
 	}
 
+	// Mirror image of the above: commits reachable from a remote-tracking tip but not from any
+	// local branch tip are sitting in `origin/*` but haven't been merged into local history yet —
+	// they've been fetched (their objects are already in topology/rev-list --all) but not pulled.
+	const localTipShas = $derived(graph.refs.filter((r) => r.kind === "branch").map((r) => r.sha));
+	const localReachable = $derived.by(() => {
+		const parentsBySha = new Map<string, string[]>();
+		for (const r of rows) if (r.kind === "commit") parentsBySha.set(r.sha, r.parents);
+		const seen = new Set<string>();
+		const stack = [...localTipShas];
+		while (stack.length > 0) {
+			const sha = stack.pop()!;
+			if (seen.has(sha)) continue;
+			seen.add(sha);
+			const parents = parentsBySha.get(sha);
+			if (parents) for (const p of parents) if (!seen.has(p)) stack.push(p);
+		}
+		return seen;
+	});
+
+	function isUnpulled(row: WipRow | GraphViewRow): boolean {
+		return (
+			hasRemoteRefs &&
+			row.kind === "commit" &&
+			remoteReachable.has(row.sha) &&
+			!localReachable.has(row.sha)
+		);
+	}
+
 	// The WIP row (§4.2) is synthesized here, not in the store, so the store stays a pure topology
 	// projection. It hangs off HEAD's lane; `allRows` is what the canvas, virtualization and DOM all
 	// index against, so the +1 offset it introduces stays consistent everywhere.
@@ -164,6 +193,7 @@
 			bg: v("--bg"),
 			surface: v("--surface"),
 			muted: v("--text-muted"),
+			behind: v("--behind"),
 		};
 	}
 
@@ -317,6 +347,17 @@
 			ctx.arc(x, y, AVATAR_RADIUS + 2.5, 0, Math.PI * 2);
 			ctx.setLineDash([3, 3]);
 			ctx.strokeStyle = c.lanes[row.node.colorIndex] ?? c.muted;
+			ctx.lineWidth = 1.5;
+			ctx.stroke();
+			ctx.setLineDash([]);
+		} else if (isUnpulled(row)) {
+			// Mirror image: commit exists on a remote tip but isn't in local history yet — a subtle
+			// `--behind`-colored dashed halo (same dash language as unpushed, opposite direction, own
+			// color so the two are never confused at a glance).
+			ctx.beginPath();
+			ctx.arc(x, y, AVATAR_RADIUS + 2.5, 0, Math.PI * 2);
+			ctx.setLineDash([3, 3]);
+			ctx.strokeStyle = c.behind;
 			ctx.lineWidth = 1.5;
 			ctx.stroke();
 			ctx.setLineDash([]);
@@ -577,6 +618,7 @@
 		void graphView.widths.branch;
 		void graphView.graphAuto;
 		void remoteReachable;
+		void localReachable;
 		void hoveredSha;
 		void scrollTop;
 		void theme.resolved;
