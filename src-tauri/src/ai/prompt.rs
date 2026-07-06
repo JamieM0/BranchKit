@@ -78,7 +78,10 @@ pub fn truncate_diff(diff: &str, max_chars: usize) -> String {
         let capped = cap_file_lines(file, 150);
         if i > 0 && out.len() + capped.len() > max_chars {
             let remaining = files.len() - i;
-            out.push_str(&format!("\n… ({remaining} more file{})\n", if remaining == 1 { "" } else { "s" }));
+            out.push_str(&format!(
+                "\n… ({remaining} more file{})\n",
+                if remaining == 1 { "" } else { "s" }
+            ));
             break;
         }
         out.push_str(&capped);
@@ -95,9 +98,8 @@ pub fn build_commit_prompt(
     diff: &str,
     max_diff_size_kb: u32,
 ) -> Vec<ChatMessage> {
-    let mut system = String::from(
-        "Write a git commit message. First line \u{2264}72 chars, imperative mood",
-    );
+    let mut system =
+        String::from("Write a git commit message. First line \u{2264}72 chars, imperative mood");
     if style == CommitStyle::Conventional {
         system.push_str(", Conventional Commits format");
     }
@@ -107,6 +109,17 @@ pub fn build_commit_prompt(
          or file list back verbatim. Output raw text only: no markdown, no code fences, no \
          headings, nothing before or after the message itself.",
     );
+    if style == CommitStyle::Conventional {
+        // Word budgets specific to Conventional Commits (requested separately from the general
+        // length rules above): the subject's descriptive words — i.e. everything after the
+        // `type(scope):` prefix, which doesn't count against this budget — are capped to 5
+        // words max, and each body bullet (one per changed file) is capped to 5–15 words.
+        system.push_str(
+            " In the subject line, the descriptive words after the `type(scope):` prefix \
+             (the prefix itself doesn't count) must be a maximum of 5 words. Each body bullet \
+             covers one changed file in 5\u{2013}15 words.",
+        );
+    }
 
     let max_chars = (max_diff_size_kb as usize).saturating_mul(1024);
     let truncated = truncate_diff(diff, max_chars);
@@ -178,7 +191,12 @@ mod tests {
 
     #[test]
     fn notes_more_files_once_total_budget_is_exceeded() {
-        let diff = format!("{}{}{}", file_block("a.txt", 5), file_block("b.txt", 5), file_block("c.txt", 5));
+        let diff = format!(
+            "{}{}{}",
+            file_block("a.txt", 5),
+            file_block("b.txt", 5),
+            file_block("c.txt", 5)
+        );
         // Budget fits only the first file's ~90 chars.
         let out = truncate_diff(&diff, 100);
         assert!(out.contains("diff --git a/a.txt"));
@@ -203,6 +221,20 @@ mod tests {
     fn plain_style_omits_conventional_commits_mention() {
         let messages = build_commit_prompt(CommitStyle::Plain, "1 file changed", "", 8);
         assert!(!messages[0].content.contains("Conventional Commits"));
+    }
+
+    #[test]
+    fn conventional_style_adds_the_word_budgets() {
+        let messages = build_commit_prompt(CommitStyle::Conventional, "1 file changed", "", 8);
+        assert!(messages[0].content.contains("maximum of 5 words"));
+        assert!(messages[0].content.contains("5\u{2013}15 words"));
+    }
+
+    #[test]
+    fn plain_style_omits_the_word_budgets() {
+        let messages = build_commit_prompt(CommitStyle::Plain, "1 file changed", "", 8);
+        assert!(!messages[0].content.contains("maximum of 5 words"));
+        assert!(!messages[0].content.contains("5\u{2013}15 words"));
     }
 
     #[test]

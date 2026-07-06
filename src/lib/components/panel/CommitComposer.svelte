@@ -107,6 +107,22 @@
 	let showAiChips = $state(false);
 	let usedUnstagedFallback = $state(false);
 
+	// "Generating..." placeholder dots while the fields are blocked and streaming hasn't produced
+	// any text yet — cycles 1→2→3 dots, least dots first, so the button/field don't look inert.
+	let generatingDots = $state(1);
+	const generatingPlaceholder = $derived(`Generating${".".repeat(generatingDots)}`);
+
+	$effect(() => {
+		if (!generating) {
+			generatingDots = 1;
+			return;
+		}
+		const id = setInterval(() => {
+			generatingDots = generatingDots >= 3 ? 1 : generatingDots + 1;
+		}, 400);
+		return () => clearInterval(id);
+	});
+
 	const aiEnabled = $derived(appSettings.current.ai.enabled);
 	// Only actually *disables* the button once AI is configured — when it isn't, the button stays
 	// clickable so it can deep-link to Settings → AI instead (§7's disabled-tooltip requirement).
@@ -209,7 +225,7 @@
 			class:warn={commitDraft.counter === "warn"}
 			class:danger={commitDraft.counter === "danger"}
 			type="text"
-			placeholder="Commit summary"
+			placeholder={generating ? generatingPlaceholder : "Commit summary"}
 			aria-label="Commit summary"
 			bind:value={commitDraft.summary}
 			disabled={generating}
@@ -253,7 +269,7 @@
 		<textarea
 			bind:this={descEl}
 			class="description"
-			placeholder="Description (optional) — Markdown allowed"
+			placeholder={generating ? generatingPlaceholder : "Description (optional) — Markdown allowed"}
 			aria-label="Commit description"
 			rows="2"
 			bind:value={commitDraft.description}
