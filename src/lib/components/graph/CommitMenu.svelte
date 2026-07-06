@@ -67,8 +67,9 @@
 		const name = tagName.trim();
 		if (!name) return;
 		const message = mode === "annotatedTag" ? tagMessage.trim() || null : null;
+		const target = sha;
 		close();
-		await actions.createTag(repoId, name, sha, message);
+		await actions.createTag(repoId, name, target, message);
 	}
 
 	// Daily-driver actions stay top-level; history-rewriting and power tools live in one
