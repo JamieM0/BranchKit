@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="src-tauri/icons/128x128@2x.png" width="88" alt="BranchKit logo" />
-
 # BranchKit
 
 **A git client that makes the hard parts feel easy.**
