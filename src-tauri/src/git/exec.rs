@@ -178,7 +178,21 @@ fn kill_process_group(pid: u32) {
 pub async fn git(repo: &Path, args: &[&str], opts: GitOpts) -> Result<GitOutput, GitError> {
     let cmd_summary = format!("git {}", args.join(" "));
     let command = build_command(repo, args);
-    run_git(command, cmd_summary, opts).await
+    run_git(command, cmd_summary, opts, &[]).await
+}
+
+/// Like [`git`], but treats the codes in `tolerate_exit_codes` as success too — for commands like
+/// `git diff --no-index` that use exit-code-1-means-differences-found semantics rather than
+/// exit-code-means-error.
+pub async fn git_tolerating(
+    repo: &Path,
+    args: &[&str],
+    opts: GitOpts,
+    tolerate_exit_codes: &[i32],
+) -> Result<GitOutput, GitError> {
+    let cmd_summary = format!("git {}", args.join(" "));
+    let command = build_command(repo, args);
+    run_git(command, cmd_summary, opts, tolerate_exit_codes).await
 }
 
 /// Like [`git`], but with extra environment variables set on top of the base config — e.g.
@@ -193,10 +207,15 @@ pub async fn git_with_env(
     let cmd_summary = format!("git {}", args.join(" "));
     let mut command = build_command(repo, args);
     command.envs(envs.iter().copied());
-    run_git(command, cmd_summary, opts).await
+    run_git(command, cmd_summary, opts, &[]).await
 }
 
-async fn run_git(mut command: Command, cmd_summary: String, opts: GitOpts) -> Result<GitOutput, GitError> {
+async fn run_git(
+    mut command: Command,
+    cmd_summary: String,
+    opts: GitOpts,
+    tolerate_exit_codes: &[i32],
+) -> Result<GitOutput, GitError> {
     let mut child = command
         .spawn()
         .map_err(|e| GitError::spawn(&cmd_summary, e))?;
@@ -228,7 +247,7 @@ async fn run_git(mut command: Command, cmd_summary: String, opts: GitOpts) -> Re
         Ok(Ok((status, stdout, stderr_bytes))) => {
             let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
             let code = status.code().unwrap_or(-1);
-            if status.success() {
+            if status.success() || tolerate_exit_codes.contains(&code) {
                 Ok(GitOutput {
                     stdout,
                     stderr,

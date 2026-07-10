@@ -196,16 +196,20 @@ pub(crate) fn build_line_patch(
             let add_sel = add.is_some_and(|(idx, _)| selected.contains(idx));
 
             if !del_sel && !add_sel {
-                // Neither side of this slot is being touched — collapse to one context line
-                // using whichever text is the file's content *right now*: the del (index/HEAD)
-                // side for a forward/stage patch, the add (already-staged) side when reversing.
-                let (text, no_nl) = match (del, add) {
-                    (Some(_), Some((_, a))) if reverse => (a.text.as_str(), a.no_newline_at_eof),
-                    (Some((_, d)), _) => (d.text.as_str(), d.no_newline_at_eof),
-                    (None, Some((_, a))) => (a.text.as_str(), a.no_newline_at_eof),
+                // Neither side of this slot is being touched. If there's a paired del, it still
+                // exists in the file/index right now, so collapse to a context line using its
+                // text (or the add's, when reversing against the staged side). A pure addition
+                // with no del counterpart has no such existing line to fall back to — it must be
+                // dropped entirely, or git can't match the resulting context line against the
+                // index and rejects the whole hunk.
+                match (del, add) {
+                    (Some(_), Some((_, a))) if reverse => {
+                        emit(&mut body, ' ', &a.text, a.no_newline_at_eof)
+                    }
+                    (Some((_, d)), _) => emit(&mut body, ' ', &d.text, d.no_newline_at_eof),
+                    (None, Some(_)) => {}
                     (None, None) => unreachable!("run always has at least one del or add"),
-                };
-                emit(&mut body, ' ', text, no_nl);
+                }
                 continue;
             }
 
@@ -541,6 +545,46 @@ mod tests {
         assert!(remaining.contains("+b1"));
         assert!(remaining.contains("+e1"));
         assert!(!remaining.contains("+a1"));
+    }
+
+    #[tokio::test]
+    async fn stages_a_subset_of_a_pure_addition_run() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path()).await;
+        std::fs::write(dir.path().join("f.txt"), "a\nb\n").unwrap();
+        commit_all(dir.path(), "init").await;
+
+        // Append two new lines with no deletions, so the hunk is a run of pure additions.
+        std::fs::write(dir.path().join("f.txt"), "a\nb\nc\nd\n").unwrap();
+        let file_diff = worktree_hunks(dir.path(), "f.txt").await;
+        assert_eq!(file_diff.hunks.len(), 1);
+        let hunk = &file_diff.hunks[0];
+        let add_indices: Vec<usize> = hunk
+            .lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.kind == DiffLineKind::Add)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(add_indices.len(), 2);
+
+        // Stage only the last added line ("d"), leaving "c" unstaged.
+        let selection = vec![add_indices[1]];
+        stage_lines_impl(dir.path(), "f.txt", 0, &selection)
+            .await
+            .unwrap();
+
+        let index_blob = git(dir.path(), &["show", ":f.txt"], GitOpts::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&index_blob.stdout),
+            "a\nb\nd\n"
+        );
+
+        let remaining = worktree_diff_text(dir.path(), "f.txt").await;
+        assert!(remaining.contains("+c"));
+        assert!(!remaining.contains("+d"));
     }
 
     #[tokio::test]

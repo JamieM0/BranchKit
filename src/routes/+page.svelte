@@ -29,6 +29,7 @@
   import { branchEdit } from "$lib/stores/branchEdit.svelte";
   import { graphNav } from "$lib/stores/graphNav.svelte";
   import { commitDraft } from "$lib/stores/commitDraft.svelte";
+  import { unstagedRows, stagedRows } from "$lib/status/sections";
   import { keepSession } from "$lib/stores/keepSession.svelte";
   import { network, retryOnFocus } from "$lib/stores/network.svelte";
   import { notifyBehindIncrease, resetBehindTracking } from "$lib/stores/behindNotifier";
@@ -95,6 +96,17 @@
       github.reset();
       githubChecks.reset();
     }
+  });
+
+  // A working-tree/staged diff can outlive the change it's showing (discard, commit, stage/
+  // unstage elsewhere) — status refreshes independently of the diff pane, so fall back to the
+  // graph instead of stranding the user on a stale "No changes" pane once the path is gone.
+  $effect(() => {
+    const target = diffView.target;
+    if (!target) return;
+    if (target.source.kind !== "workingTree" && target.source.kind !== "staged") return;
+    const rows = target.source.kind === "staged" ? stagedRows(status.report.entries) : unstagedRows(status.report.entries);
+    if (!rows.some((r) => r.path === target.path)) diffView.close();
   });
 
   // DESIGN_SPEC.md §8/§15.19: "`branch` is N behind — Pull" toast whenever a fetch (manual or

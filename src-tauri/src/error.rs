@@ -174,7 +174,7 @@ impl From<GitError> for AppError {
             Some((user_message, suggestion)) => {
                 Self::with_suggestion(user_message, raw, suggestion)
             }
-            None => Self::new(e.to_string(), raw),
+            None => Self::new("Git reported an error running this command", raw),
         }
     }
 }

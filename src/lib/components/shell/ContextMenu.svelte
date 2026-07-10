@@ -75,11 +75,25 @@
 		if (!item.keepOpen) onDismiss();
 		void item.run();
 	}
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === "Escape") {
+			e.stopPropagation();
+			onDismiss();
+		}
+	}
+
+	/** Root menus need to receive keydown events without a mouse interaction first, so give the
+	 * menu focus as soon as it mounts (nested submenus don't call this — the root listener already
+	 * covers them since Escape bubbles up, but each submenu also stops propagation once handled). */
+	function focusMenu(node: HTMLElement) {
+		node.focus();
+	}
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 <div class="scrim" onclick={onDismiss} oncontextmenu={(e) => e.preventDefault()}></div>
-<div class="menu" role="menu" aria-label={ariaLabel} bind:clientWidth={menuWidth} bind:clientHeight={menuHeight} style="left: {clampedX}px; top: {clampedY}px;">
+<div class="menu" role="menu" tabindex="-1" aria-label={ariaLabel} bind:clientWidth={menuWidth} bind:clientHeight={menuHeight} style="left: {clampedX}px; top: {clampedY}px;" onkeydown={handleKeydown} use:focusMenu>
 	{#each items as item, i (i)}
 		{#if item.type === "separator"}
 			<div class="sep"></div>

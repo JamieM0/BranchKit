@@ -10,7 +10,7 @@ use tauri::State;
 use crate::error::AppError;
 use crate::state::AppState;
 
-use super::exec::{git, GitError, GitOpts};
+use super::exec::{git, git_tolerating, GitError, GitOpts};
 use super::ops::require_repo;
 
 const IMAGE_EXTENSIONS: &[&str] = &[
@@ -56,9 +56,37 @@ pub struct FileDiff {
     pub eol_only: bool,
 }
 
-/// Worktree vs index: `git diff -- <path>`.
+/// Worktree vs index: `git diff -- <path>`. Untracked files have no index blob to diff against,
+/// so plain `git diff` reports nothing for them — fall back to `git diff --no-index` against
+/// `/dev/null` to show the new file's contents as an all-additions diff.
 pub async fn diff_worktree(repo: &Path, path: &str, ignore_whitespace: bool) -> Result<FileDiff, GitError> {
+    if is_untracked(repo, path).await? {
+        return diff_new_file(repo, path, ignore_whitespace).await;
+    }
     run_diff(repo, &["diff", "--no-color", "-U3", "--", path], ignore_whitespace).await
+}
+
+/// `git ls-files --error-unmatch` exits nonzero when `path` isn't tracked in the index.
+async fn is_untracked(repo: &Path, path: &str) -> Result<bool, GitError> {
+    match git(repo, &["ls-files", "--error-unmatch", "--", path], GitOpts::default()).await {
+        Ok(_) => Ok(false),
+        Err(_) => Ok(true),
+    }
+}
+
+/// `git diff --no-index` against `/dev/null` — exits 1 (differences found) in the normal case,
+/// which we tolerate rather than treat as an error (ARCHITECTURE.md §3 rule 5 covers *real*
+/// nonzero exits; this command's exit code just means "the files differ").
+async fn diff_new_file(repo: &Path, path: &str, ignore_whitespace: bool) -> Result<FileDiff, GitError> {
+    let mut args = vec!["diff", "--no-color", "-U3", "--no-index"];
+    if ignore_whitespace {
+        args.push("-w");
+    }
+    args.push("--");
+    args.push("/dev/null");
+    args.push(path);
+    let output = git_tolerating(repo, &args, GitOpts::default(), &[1]).await?;
+    Ok(parse_diff_output(&output.stdout))
 }
 
 /// Index vs HEAD: `git diff --cached -- <path>`.
@@ -574,6 +602,26 @@ mod tests {
             .lines
             .iter()
             .all(|l| l.kind == DiffLineKind::Add));
+    }
+
+    #[tokio::test]
+    async fn diff_worktree_shows_untracked_new_file_as_all_additions() {
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), &["init", "--initial-branch=main", "-q"], GitOpts::default())
+            .await
+            .unwrap();
+        git(dir.path(), &["config", "user.name", "T"], GitOpts::default())
+            .await
+            .unwrap();
+        git(dir.path(), &["config", "user.email", "t@example.com"], GitOpts::default())
+            .await
+            .unwrap();
+        std::fs::write(dir.path().join("new.txt"), "hello\nworld\n").unwrap();
+
+        let diff = diff_worktree(dir.path(), "new.txt", false).await.unwrap();
+        assert_eq!(diff.new_path.as_deref(), Some("new.txt"));
+        assert_eq!(diff.hunks.len(), 1);
+        assert!(diff.hunks[0].lines.iter().all(|l| l.kind == DiffLineKind::Add));
     }
 
     #[test]
