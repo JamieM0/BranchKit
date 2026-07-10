@@ -17,3 +17,6 @@ Cargo.lock.bak
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+# Docs
+/docs
