@@ -117,6 +117,10 @@
 			generatingDots = 1;
 			return;
 		}
+		if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+			generatingDots = 3;
+			return;
+		}
 		const id = setInterval(() => {
 			generatingDots = generatingDots >= 3 ? 1 : generatingDots + 1;
 		}, 400);
@@ -435,7 +439,7 @@
 
 	.ai.generating {
 		cursor: wait;
-		animation: ai-pulse 900ms ease-in-out infinite;
+		animation: ai-pulse var(--motion-loop) ease-in-out infinite;
 	}
 
 	@keyframes ai-pulse {
@@ -450,7 +454,7 @@
 
 	.spin {
 		display: inline-flex;
-		animation: ai-spin 900ms linear infinite;
+		animation: ai-spin var(--motion-loop) linear infinite;
 	}
 
 	@keyframes ai-spin {

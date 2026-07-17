@@ -21,6 +21,9 @@ impl TestRepo {
         repo.run(&["config", "user.name", "Test User"]).await;
         repo.run(&["config", "user.email", "test@example.com"])
             .await;
+        // Keep byte-for-byte text fixtures deterministic even when the host Git installation
+        // defaults to `core.autocrlf=true` (as GitHub's Windows runners do).
+        repo.run(&["config", "core.autocrlf", "false"]).await;
         // Deterministic commit dates so tests never depend on wall-clock time.
         repo.run(&["config", "commit.gpgsign", "false"]).await;
         repo

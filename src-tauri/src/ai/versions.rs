@@ -66,8 +66,10 @@ pub fn current_platform_asset_url() -> Option<String> {
     current_platform_asset().map(|a| download_url(a.asset_name))
 }
 
-/// The pinned model — Google's official QAT q4_0 GGUF of Gemma 4 E2B instruction-tuned
-/// (~3.3 GB, DESIGN_SPEC.md §13's model card; replaces the original Gemma 3 1B pin per Jamie).
+/// SPEC-DEVIATION (DESIGN_SPEC.md §13): Jamie explicitly replaced the originally specified Gemma
+/// 3 1B pin with Google's official QAT q4_0 GGUF of Gemma 4 E2B instruction-tuned (~3.3 GB).
+/// Keeping the larger pin in this polish pass avoids silently changing a multi-gigabyte runtime
+/// asset; the UI, changelog, URL, checksum, and size all describe the shipped pin consistently.
 /// sha256 recorded at pin time from the repo's own LFS metadata
 /// (`google/gemma-4-E2B-it-qat-q4_0-gguf`, file `gemma-4-E2B_q4_0-it.gguf`).
 pub const MODEL_FILE_NAME: &str = "gemma-4-E2B_q4_0-it.gguf";

@@ -19,13 +19,13 @@ jobs:
       matrix:
         include:
           - platform: macos-latest # arm64
-            args: "--target aarch64-apple-darwin"
+            args: "--target aarch64-apple-darwin --bundles dmg"
           - platform: macos-latest # Intel
-            args: "--target x86_64-apple-darwin"
+            args: "--target x86_64-apple-darwin --bundles dmg"
           - platform: ubuntu-22.04
-            args: ""
+            args: "--bundles appimage,deb"
           - platform: windows-latest
-            args: ""
+            args: "--bundles msi"
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -62,5 +62,5 @@ jobs:
           releaseName: "BranchKit ${{ github.ref_name }}"
           releaseBody: "See CHANGELOG.md for what's new."
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}

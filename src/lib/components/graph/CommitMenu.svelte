@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ContextMenu, { type MenuItem } from "$lib/components/shell/ContextMenu.svelte";
 	import * as actions from "$lib/actions";
+	import { focusOnMount } from "$lib/focus";
 	import { worktreeDialog } from "$lib/stores/worktreeDialog.svelte";
 
 	/** Commit row right-click menu — GITKRAKEN_WORKFLOWS.md §3.1, DESIGN_SPEC.md §15.30. Everything
@@ -163,7 +164,7 @@
 	<div class="panel" style="left: {x}px; top: {y}px;">
 		<label class="field">
 			Tag name
-			<input type="text" bind:value={tagName} placeholder="v1.0.0" autofocus />
+			<input type="text" bind:value={tagName} placeholder="v1.0.0" use:focusOnMount />
 		</label>
 		{#if mode === "annotatedTag"}
 			<label class="field">
@@ -265,7 +266,7 @@
 	.actions .danger-solid {
 		background: var(--danger);
 		border-color: var(--danger);
-		color: #fff;
+		color: var(--bg);
 		font-weight: 600;
 	}
 

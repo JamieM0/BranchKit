@@ -437,8 +437,18 @@ describe("assignLanes", () => {
 
 	// The canvas draws per-row segments; for lines to join across rows, the set of lanes leaving a
 	// row's bottom boundary must equal the set entering the next row's top boundary.
-	function boundaryLanes(row: GraphLaneRow, at: "top" | "bottom"): Set<number> {
+	function boundaryLanes(
+		row: GraphLaneRow,
+		rowIndex: number,
+		at: "top" | "bottom",
+		spansByLane: ReturnType<typeof assignLanes>["passSpansByLane"],
+	): Set<number> {
 		const lanes = new Set<number>();
+		for (let lane = 0; lane < spansByLane.length; lane += 1) {
+			if (spansByLane[lane]?.some((span) => span.startRow <= rowIndex && span.endRow >= rowIndex)) {
+				lanes.add(lane);
+			}
+		}
 		const collect = (end: SegmentEnd) => {
 			if (end.at === at) lanes.add(end.lane);
 		};
@@ -454,11 +464,14 @@ describe("assignLanes", () => {
 	}
 
 	function expectContinuous(topology: GraphTopologyRow[]) {
-		const { rows } = assignLanes(topology);
-		expect(boundaryLanes(rows[0], "top").size).toBe(0);
-		expect(boundaryLanes(rows.at(-1)!, "bottom").size).toBe(0);
+		const { rows, passSpansByLane } = assignLanes(topology);
+		expect(boundaryLanes(rows[0], 0, "top", passSpansByLane).size).toBe(0);
+		expect(boundaryLanes(rows.at(-1)!, rows.length - 1, "bottom", passSpansByLane).size).toBe(0);
 		for (let i = 0; i < rows.length - 1; i += 1) {
-			expectSetsEqual(boundaryLanes(rows[i], "bottom"), boundaryLanes(rows[i + 1], "top"));
+			expectSetsEqual(
+				boundaryLanes(rows[i], i, "bottom", passSpansByLane),
+				boundaryLanes(rows[i + 1], i + 1, "top", passSpansByLane),
+			);
 		}
 	}
 
@@ -502,7 +515,7 @@ describe("assignLanes", () => {
 		});
 
 		it("passes active lanes straight through a stash row with a dashed connector", () => {
-			const { rows } = assignLanes([
+			const { rows, passSpansByLane } = assignLanes([
 				commit("C", ["B"]),
 				commit("B", ["A"]),
 				stash("STASH", "B", "stash: keep changes"),
@@ -511,11 +524,7 @@ describe("assignLanes", () => {
 			const stashRow = rows.find((r) => r.kind === "stash")!;
 			expect(stashRow.segments.some((s) => s.dashed && s.to.at === "node")).toBe(true);
 			// Lane 0 (B's first parent A) keeps flowing through the stash row.
-			expect(
-				stashRow.segments.some(
-					(s) => !s.dashed && s.from.at === "top" && s.to.at === "bottom",
-				),
-			).toBe(true);
+			expect(passSpansByLane[0].some((span) => span.startRow <= 2 && span.endRow >= 2)).toBe(true);
 		});
 	});
 

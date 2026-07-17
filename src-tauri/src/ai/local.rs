@@ -299,7 +299,6 @@ async fn ensure_running(app: &AppHandle, ai_state: &AiState) -> Result<u16, AppE
         .stderr(std::process::Stdio::null());
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
 

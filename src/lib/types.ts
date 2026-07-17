@@ -408,6 +408,11 @@ export interface CredentialInfo {
 	lastUsedAt: number;
 }
 
+export interface CredentialStorageStatus {
+	persistent: boolean;
+	warning: string | null;
+}
+
 export interface SshAgentStatus {
 	agentRunning: boolean;
 	identities: string[];

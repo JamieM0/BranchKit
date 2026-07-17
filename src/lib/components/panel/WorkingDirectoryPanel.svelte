@@ -522,7 +522,7 @@
 		border: 1px solid var(--danger);
 		border-radius: var(--radius-control);
 		background: var(--danger);
-		color: white;
+		color: var(--bg);
 		font: inherit;
 		font-size: 11px;
 		font-weight: 600;

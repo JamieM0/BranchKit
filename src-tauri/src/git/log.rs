@@ -248,14 +248,50 @@ pub async fn stash_list(repo: &Path) -> Result<Vec<StashEntry>, GitError> {
 pub async fn get_graph(
     state: State<'_, AppState>,
     repo_id: String,
-) -> Result<Vec<GraphTopologyRow>, AppError> {
+) -> Result<String, AppError> {
     let handle = state.get_repo(&repo_id).ok_or_else(|| {
         AppError::new(
             "Repository is not open",
             format!("unknown repo id {repo_id}"),
         )
     })?;
-    Ok(graph_rows(&handle.path).await?)
+    // A 20k topology contains tens of thousands of nested strings and arrays. Returning that Vec
+    // directly makes WebKit's Tauri bridge expand every Rust value individually. Cross the bridge
+    // as one compact line protocol instead; ipc.ts restores the same typed rows. `C` fields cannot
+    // contain whitespace (they are object ids). Only stash subjects are free text, so JSON-quote
+    // that final field while keeping the overwhelmingly common commit row allocation-free.
+    let rows = graph_rows(&handle.path).await?;
+    let mut payload = String::with_capacity(rows.len() * 86);
+    for row in rows {
+        match row {
+            GraphTopologyRow::Commit { sha, parents } => {
+                payload.push_str("C ");
+                payload.push_str(&sha);
+                for parent in parents {
+                    payload.push(' ');
+                    payload.push_str(&parent);
+                }
+                payload.push('\n');
+            }
+            GraphTopologyRow::Stash {
+                sha,
+                base_sha,
+                selector,
+                subject,
+            } => {
+                payload.push_str("S\t");
+                payload.push_str(&sha);
+                payload.push('\t');
+                payload.push_str(&base_sha);
+                payload.push('\t');
+                payload.push_str(&selector);
+                payload.push('\t');
+                payload.push_str(&serde_json::to_string(&subject)?);
+                payload.push('\n');
+            }
+        }
+    }
+    Ok(payload)
 }
 
 #[tauri::command]

@@ -164,7 +164,7 @@
     border-radius: var(--radius-pill);
     border: 1.5px solid var(--border);
     border-top-color: var(--accent);
-    animation: spin 0.7s linear infinite;
+    animation: spin var(--motion-loop) linear infinite;
   }
 
   @keyframes spin {
