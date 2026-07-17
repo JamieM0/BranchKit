@@ -145,6 +145,7 @@ pub fn run() {
             settings::get_settings,
             settings::update_settings,
             credentials::list_credentials,
+            credentials::credential_storage_status,
             credentials::remove_credential,
             credentials::save_credential,
             credentials::get_ssh_agent_status,

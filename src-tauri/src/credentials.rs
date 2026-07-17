@@ -10,8 +10,9 @@
 
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Once;
+use std::sync::{Mutex, Once, OnceLock};
 use zeroize::Zeroizing;
 
 const SERVICE: &str = "BranchKit";
@@ -23,6 +24,11 @@ fn account_for(host: &str, username: &str) -> String {
 }
 
 static INIT_DEFAULT_STORE: Once = Once::new();
+static MEMORY_SECRETS: OnceLock<Mutex<HashMap<String, Zeroizing<String>>>> = OnceLock::new();
+
+fn memory_secrets() -> &'static Mutex<HashMap<String, Zeroizing<String>>> {
+    MEMORY_SECRETS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// Works around a bug in `keyring` 4.1.3's `v1` shim (see the `keyring-core` dependency comment
 /// in Cargo.toml): its lazy default-store init never actually runs, so every `Entry::new()` call
@@ -51,18 +57,74 @@ fn entry(account: &str) -> Result<Entry, keyring::Error> {
 /// without libsecret degrades to in-memory-only secrets) — a miss here is an expected case for
 /// every caller, never a hard failure.
 pub fn get_secret(account: &str) -> Option<Zeroizing<String>> {
-    let e = entry(account).ok()?;
-    e.get_password().ok().map(Zeroizing::new)
+    if let Ok(secret) = entry(account).and_then(|e| e.get_password()) {
+        return Some(Zeroizing::new(secret));
+    }
+    memory_secrets()
+        .lock()
+        .ok()?
+        .get(account)
+        .map(|secret| Zeroizing::new(secret.as_str().to_owned()))
 }
 
 pub fn set_secret(account: &str, secret: &str) -> Result<(), keyring::Error> {
-    entry(account)?.set_password(secret)
+    match entry(account).and_then(|e| e.set_password(secret)) {
+        Ok(()) => {
+            if let Ok(mut memory) = memory_secrets().lock() {
+                memory.remove(account);
+            }
+            Ok(())
+        }
+        Err(_) => {
+            // ARCHITECTURE.md §14: Linux desktops without libsecret/gnome-keyring retain secrets
+            // only for this process lifetime. Zeroizing values wipe their allocation on removal
+            // or app exit; nothing from this fallback is written to disk.
+            if let Ok(mut memory) = memory_secrets().lock() {
+                memory.insert(account.to_string(), Zeroizing::new(secret.to_string()));
+            }
+            Ok(())
+        }
+    }
 }
 
 pub fn delete_secret(account: &str) {
+    if let Ok(mut memory) = memory_secrets().lock() {
+        memory.remove(account);
+    }
     // Best-effort: erasing something already absent isn't an error worth surfacing.
     if let Ok(e) = entry(account) {
         let _ = e.delete_credential();
+    }
+}
+
+fn credential_storage_persistent() -> bool {
+    let Ok(probe) = entry("__branchkit_storage_probe__") else {
+        return false;
+    };
+    matches!(
+        probe.get_password(),
+        Ok(_) | Err(keyring::Error::NoEntry)
+    )
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialStorageStatus {
+    pub persistent: bool,
+    pub warning: Option<String>,
+}
+
+/// Lets the shell surface ARCHITECTURE.md §14's Linux/libsecret degradation instead of silently
+/// implying that a session-only credential was saved persistently.
+#[tauri::command]
+pub fn credential_storage_status() -> CredentialStorageStatus {
+    let persistent = credential_storage_persistent();
+    CredentialStorageStatus {
+        persistent,
+        warning: (!persistent).then(|| {
+            "Secure credential storage is unavailable — secrets will be kept in memory for this session only."
+                .to_string()
+        }),
     }
 }
 

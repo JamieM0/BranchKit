@@ -20,7 +20,12 @@
 		visibleRowRange,
 	} from "$lib/graph/geometry";
 	import { AvatarCache, authorInitials, discColorIndex } from "$lib/graph/avatars";
-	import type { GraphSegment, SegmentEnd } from "$lib/graph/lanes";
+	import {
+		laneColorIndex,
+		type GraphSegment,
+		type LanePassSpan,
+		type SegmentEnd,
+	} from "$lib/graph/lanes";
 	import type { Pill } from "$lib/graph/pills";
 	import { graph } from "$lib/stores/graph.svelte";
 	import { status } from "$lib/stores/status.svelte";
@@ -239,6 +244,17 @@
 		return nodeLane;
 	}
 
+	function firstOverlappingSpan(spans: readonly LanePassSpan[], row: number): number {
+		let low = 0;
+		let high = spans.length;
+		while (low < high) {
+			const mid = (low + high) >>> 1;
+			if (spans[mid].endRow < row) low = mid + 1;
+			else high = mid;
+		}
+		return low;
+	}
+
 	function drawInitialsDisc(
 		ctx: CanvasRenderingContext2D,
 		x: number,
@@ -387,8 +403,50 @@
 
 		const lit = hoveredSha ? lineageKeys(hoveredSha) : null;
 
-		// Pass 1: lane lines. Drawn before nodes so avatars sit on top.
+		// Pass 1: straight-through lanes. They are stored as compact ranges and batched into one
+		// path per palette color, rather than issuing thousands of individual strokes per frame.
 		ctx.lineWidth = 1.6;
+		const passPaths = Array.from({ length: 8 }, () => new Path2D());
+		const litPassPaths = hoveredSha ? Array.from({ length: 8 }, () => new Path2D()) : null;
+		const passRowOffset = wipOffset;
+		for (let lane = 0; lane < graph.passSpansByLane.length; lane += 1) {
+			const spans = graph.passSpansByLane[lane] ?? [];
+			let spanIndex = firstOverlappingSpan(spans, Math.max(0, win.start - passRowOffset));
+			for (; spanIndex < spans.length; spanIndex += 1) {
+				const span = spans[spanIndex];
+				const start = span.startRow + passRowOffset;
+				const end = span.endRow + passRowOffset;
+				if (start >= win.end) break;
+				const clippedStart = Math.max(start, win.start);
+				const clippedEnd = Math.min(end, win.end - 1);
+				const x = graphLeft + laneCenterX(lane);
+				const path = passPaths[laneColorIndex(lane)];
+				path.moveTo(x, clippedStart * ROW_HEIGHT - st);
+				path.lineTo(x, (clippedEnd + 1) * ROW_HEIGHT - st);
+				if (litPassPaths) {
+					const litPath = litPassPaths[laneColorIndex(lane)];
+					for (let row = clippedStart; row <= clippedEnd; row += 1) {
+						if (!lit?.has(`${row}:${lane}`)) continue;
+						litPath.moveTo(x, row * ROW_HEIGHT - st);
+						litPath.lineTo(x, (row + 1) * ROW_HEIGHT - st);
+					}
+				}
+			}
+		}
+		ctx.globalAlpha = hoveredSha ? 0.3 : 0.9;
+		for (let color = 0; color < passPaths.length; color += 1) {
+			ctx.strokeStyle = c.lanes[color] ?? c.muted;
+			ctx.stroke(passPaths[color]);
+		}
+		if (litPassPaths) {
+			ctx.globalAlpha = 1;
+			for (let color = 0; color < litPassPaths.length; color += 1) {
+				ctx.strokeStyle = c.lanes[color] ?? c.muted;
+				ctx.stroke(litPassPaths[color]);
+			}
+		}
+
+		// Pass 2: branch, merge and node transitions. Drawn before nodes so avatars sit on top.
 		for (let i = win.start; i < win.end; i += 1) {
 			const row = allRows[i];
 			const yTop = i * ROW_HEIGHT - st;
@@ -416,7 +474,7 @@
 		ctx.setLineDash([]);
 		ctx.globalAlpha = 1;
 
-		// Pass 2: nodes + avatars.
+		// Pass 3: nodes + avatars.
 		for (let i = win.start; i < win.end; i += 1) {
 			const row = allRows[i];
 			const yMid = i * ROW_HEIGHT - st + ROW_HEIGHT / 2;
@@ -614,6 +672,7 @@
 				if (seg.to.at !== "node" && seg.to.lane > maxLane) maxLane = seg.to.lane;
 			}
 		}
+		maxLane = Math.max(maxLane, graph.laneColors.length - 1);
 		graphView.setGraphAuto(graphWidthForLanes(maxLane));
 	});
 
@@ -971,7 +1030,7 @@
 	.shimmer {
 		background: linear-gradient(90deg, var(--surface) 25%, var(--raised) 50%, var(--surface) 75%);
 		background-size: 200% 100%;
-		animation: shimmer 1.4s linear infinite;
+		animation: shimmer var(--motion-loop) linear infinite;
 		border-radius: var(--radius-control);
 	}
 

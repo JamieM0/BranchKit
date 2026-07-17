@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { githubChecks } from "$lib/stores/githubChecks.svelte";
+	import { focusOnMount } from "$lib/focus";
 	import { openInBrowser } from "$lib/ipc";
 
 	/** The CI dot on a commit row — DESIGN_SPEC.md §12/§15.23: "tiny 6px dot right of message:
@@ -47,7 +48,7 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 		<div class="scrim" onclick={() => (popoverOpen = false)}></div>
 		<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-		<div class="popover" role="dialog" aria-label="CI checks" onclick={stop}>
+		<div class="popover" role="dialog" aria-label="CI checks" tabindex="-1" onclick={stop} use:focusOnMount>
 			{#each status.runs as run (run.name)}
 				<div class="check-row">
 					<span class="dot small {run.conclusion ?? run.status}"></span>
@@ -87,7 +88,7 @@
 
 	.ci-dot.pending {
 		background: var(--warn);
-		animation: pulse 1.4s ease-in-out infinite;
+		animation: pulse var(--motion-loop) ease-in-out infinite;
 	}
 
 	@keyframes pulse {

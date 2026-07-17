@@ -14,6 +14,7 @@ import type {
   CreatedGithubRepo,
   CreatedPr,
   CredentialInfo,
+  CredentialStorageStatus,
   DeviceCode,
   DiscardedEntry,
   Divergence,
@@ -72,7 +73,24 @@ export async function setGitIdentity(name: string, email: string): Promise<void>
 }
 
 export async function getGraph(repoId: string): Promise<GraphTopologyRow[]> {
-  return invoke("get_graph", { repoId });
+  const payload = await invoke<string>("get_graph", { repoId });
+  return payload
+    .split("\n")
+    .filter(Boolean)
+    .map((line): GraphTopologyRow => {
+      if (line.startsWith("C ")) {
+        const [sha, ...parents] = line.slice(2).split(" ");
+        return { kind: "commit", sha, parents };
+      }
+      const [sha, baseSha, selector, subject] = line.slice(2).split("\t", 4);
+      return {
+        kind: "stash",
+        sha,
+        baseSha,
+        selector,
+        subject: JSON.parse(subject) as string,
+      };
+    });
 }
 
 export async function getCommitMeta(repoId: string, shas: string[]): Promise<CommitMeta[]> {
@@ -565,6 +583,10 @@ export async function updateSettings(settings: AppSettings): Promise<void> {
 
 export async function listCredentials(): Promise<CredentialInfo[]> {
   return invoke("list_credentials");
+}
+
+export async function credentialStorageStatus(): Promise<CredentialStorageStatus> {
+  return invoke("credential_storage_status");
 }
 
 export async function removeCredential(host: string, username: string): Promise<void> {

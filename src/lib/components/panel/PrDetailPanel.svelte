@@ -291,7 +291,7 @@
 	button.danger-solid {
 		background: var(--danger);
 		border-color: transparent;
-		color: #fff;
+		color: var(--bg);
 		font-weight: 600;
 	}
 

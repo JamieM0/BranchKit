@@ -346,7 +346,7 @@
 	.danger {
 		border-color: var(--danger);
 		background: var(--danger);
-		color: white;
+		color: var(--bg);
 		font-weight: 600;
 	}
 

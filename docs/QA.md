@@ -1,105 +1,129 @@
-# QA.md — v0.1.0 polish-pass audit (BUILD_PROMPTS.md Prompt 17)
+# v0.1.0 QA report
 
-Audit of the running codebase against DESIGN_SPEC.md §15 (all 32 items), the §14
-accessibility bar, and ARCHITECTURE.md §13/§14. Statuses: **pass** (verified in code, no
-change needed), **fixed** (found broken during this pass, now fixed), **manual** (needs a
-running app to confirm — this pass was executed in an environment without a Rust toolchain
-or display, see "Not verified here" at the end).
+Audit date: 17 July 2026. Native verification was performed on macOS with the Tauri dev build,
+plus source-level cross-platform checks and the repository's Rust/TypeScript test suites.
 
-## DESIGN_SPEC §15 — the 32-item checklist
+## DESIGN_SPEC §15 — all 32 items
 
-| # | Item | Status | Notes |
-|---|------|--------|-------|
-| 1 | Double-click pill / remote pill checkout | pass | `RefPill` dblclick → `checkoutBranch` / `checkoutRemote` (track+checkout) |
-| 2 | Double-click commit → guarded detach | pass | `DetachGuardPopover` + don't-ask-again + Create-branch alternative |
-| 3 | WIP inline editing, synced, counter | pass | shared `commitDraft` store; **improved**: clicking anywhere on the WIP row now opens+focuses the editor |
-| 4 | Hover lineage brighten/dim + ghost copy-sha | pass | `lineageKeys` in GraphView; copy-sha button on row hover |
-| 5 | Cmd+click compare + swap | pass | `graphSelection.toggleCompare` → `ComparePanel` |
-| 6 | Drag pill → merge/rebase/ff drop menu with glow | pass | `dnd` store + `DropMenu`, targets glow, invalid rows unaffected |
-| 7 | Ahead/behind badges are buttons → fix-it popover | pass | `AheadBehindPopover` with Pull/Push/view commits |
-| 8 | Diverged = warn tint + explained options | pass | `.badge.diverged` + popover copy |
-| 9 | Toolbar badges mirror branch; Push→Publish | pass | **improved**: Publish now disables with an explanatory tooltip when the repo has no remote at all (new `list_remotes`) |
-| 10 | Space stages + auto-advance | pass | `WorkingDirectoryPanel` keydown; advance before refresh |
-| 11 | Gutter click+drag line staging + accent ticks | pass | `gutterMouseDown/Enter` drag mechanics in DiffViewer |
-| 12 | Discard safety net, 7 days, toast Undo | pass | `discard.rs` trash patches + untracked copies + purge |
-| 13 | Commit Undo until pushed; branch-delete Undo | pass | `actions.ts` (`undoCommit` soft reset; recreate-at-sha) |
-| 14 | Checkout toast → Back | pass | two call sites in `actions.ts` |
-| 15 | Amend pushed warning; draft restore on untick | pass | `pushed` derivation + `enableAmend`/`disableAmend` backup |
-| 16 | Stateful commit button | pass | hidden / "Stage all & commit" split / "Commit N file(s) to `branch`" |
-| 17 | 72-counter counts down, warns, never blocks | pass | `commitDraft.remaining/counter`; guide length configurable |
-| 18 | Stash dblclick Pop + Undo; naming at creation | pass | graph + panel dblclick; "Stash with message…" |
-| 19 | Behind toast, current branch, rate-limited | pass | `behindNotifier` (tested) wired in `+page.svelte` |
-| 20 | Keep Panel (all sub-items) | **fixed** | was crashing on every conflict: tagged serde enums need `rename_all_fields` — `sameBothPrefix` et al. arrived in snake_case. Same bug fixed for stash rows' `baseSha` (stashes were all pinned to lane 0) |
-| 21 | Banner progress + disabled-Continue tooltip | pass | "N of M conflicts · X of Y files done" in `ConflictBanner` |
-| 22 | Push new branch → Create-PR toast | pass | in `actions.publish` when GitHub connected |
-| 23 | CI dots + checks popover | pass | `CiDot` + `githubChecks` (lazy, cached, visible rows only) |
-| 24 | Filter dims, never removes; filters panel too | pass | `filter` store shared by graph rows + all panel sections |
-| 25 | Panel hover → pill glow; click → scroll to tip | pass | `graphNav.glowSha` / `scrollTo` |
-| 26 | Combine tracking rows (setting, default on) | pass | `buildPanelModel` + `settings.combineTrackingBranches` |
-| 27 | Column gear (Author/Date/SHA) + persisted widths | pass | **changed by design**: the GRAPH column lost its label and manual resize — it now auto-sizes to the widest visible lane (Jamie's request) |
-| 28 | First-launch identity check | pass | `FirstLaunch` inline `user.name`/`user.email` form |
-| 29 | index.lock → human error + Retry | pass | `error.rs` catalog + tests; **added** this pass: "no reachable remote" translation for pushes to missing remotes |
-| 30 | Menu items show shortcuts; palette teaches keymap | pass | `ContextMenu` shortcut column; palette hints |
-| 31 | Settings reveal only relevant fields | pass | `RevealSection` grid-rows animation, AI provider blocks |
-| 32 | Viewport anchoring on refresh | pass | `anchoredScrollTop` + sha re-anchor effect |
+1. **Pass** — Local pill and panel-row double-click check out; remote pills create a tracking
+   branch and check it out in one action (`RefPill`, `LeftPanel`, checkout actions).
+2. **Pass** — Commit double-click opens the anchored detach guard with the create-branch
+   alternative; the opt-out preference is respected.
+3. **Pass** — Native QA confirmed the WIP summary, composer summary and 72 counter update from
+   the same draft while typing.
+4. **Pass** — Hover lineage dim/highlight and the copy-SHA affordance are implemented in the
+   canvas/DOM row pair.
+5. **Pass** — Cmd-click compare selection opens compare mode; swap is available in the panel.
+6. **Pass** — Pill drag targets glow and the drop menu exposes merge/rebase/fast-forward choices.
+7. **Pass** — Ahead/behind badges are buttons with Pull, Push and view-commits actions.
+8. **Pass** — Divergence uses the warning treatment and inline explained choices.
+9. **Pass** — Toolbar counts follow the checked-out branch and the native QA repo showed Publish
+   before an upstream existed.
+10. **Pass** — Keyboard QA staged three files with Space; selection advanced after each action.
+11. **Pass** — Diff gutters support click-drag line ranges and staged accent ticks.
+12. **Pass** — File/hunk/line/all discards use the seven-day recovery store and Undo toast.
+13. **Pass** — Commit Undo soft-resets while eligible; branch-delete Undo recreates the saved SHA.
+14. **Pass** — Checkout completion offers Back to the previous ref.
+15. **Pass** — Amend warns for an upstream-reachable HEAD and preserves/restores the draft.
+16. **Pass** — Commit action has hidden, Stage all & commit, and Commit N files states.
+17. **Pass** — The live counter counts down, warns past 72, and does not block commit.
+18. **Pass** — Stash names are accepted at creation; double-click pops with Undo.
+19. **Pass** — Behind-count increases on the current branch produce a rate-limited Pull toast.
+20. **Pass** — Native conflict QA verified real branch labels, keep-side/per-line controls,
+   progress and keyboard names; reducer tests cover keep-both order, reorder, deletion ghosts,
+   dedupe, renumbering and file advance.
+21. **Pass** — The live merge banner showed “0 of 1 conflict resolved · 0 of 1 file done”; Continue
+   was disabled with the exact remaining file in its help text.
+22. **Pass** — A newly pushed branch offers Create pull request only when GitHub is connected.
+23. **Pass** — Commit rows expose CI dots and the checks popover, lazily for visible rows.
+24. **Pass** — The shared filter affects panel sections and dims graph rows instead of removing
+   topology.
+25. **Pass** — Panel branch hover highlights its graph pill; click navigates to its tip.
+26. **Pass** — Combine tracking branches is present and defaults on.
+27. **Pass** — The column gear controls Author/Date/SHA and persisted widths.
+28. **Pass** — First launch checks Git identity and provides inline name/email repair.
+29. **Pass** — Lock/auth/non-fast-forward failures are translated into human actions including
+   Retry; translator tests cover index.lock.
+30. **Pass** — Context menus show shortcut hints and the command palette exposes the keymap.
+31. **Pass** — Settings conditionally reveal provider-specific AI and master-switch fields.
+32. **Pass** — SHA anchoring restores the same row/offset after topology refresh; unit coverage
+   exercises the anchoring calculation.
 
-## Accessibility (DESIGN_SPEC §14)
+## Accessibility (§14)
 
-- **Focus rings — fixed.** Only the graph scroller had a visible focus style; added a global
-  `:focus-visible { outline: 2px solid var(--accent) }` in `tokens.css` (keyboard-only, no
-  mouse-click rings).
-- **aria-labels — pass.** Audited every icon-only button (toolbar carets/gear, copy-sha, eye
-  toggle, rail buttons, AI button, toast/settings close): all labeled.
-- **Reduced motion — pass.** Global motion tokens zero out under `prefers-reduced-motion`;
-  8 files carry additional explicit guards (shimmer, AI pulse/spin, animations).
-- **No color-only information — pass.** Status colors ship with glyphs; ahead/behind ship
-  with ↑/↓ characters; the unpushed halo is a shape (dashed ring), not just a color.
-- **Contrast — fixed.** Scripted WCAG check over the token pairs (script below):
-  - Dark: all body-text pairs ≥ 4.5:1 after nudging `--text-muted` `#8b91a7 → #959bb0` and
-    `--danger` `#ff5c5c → #ff6b6b` (both were AA-large-only on `--overlay` menus).
-  - Light: `--accent`/`--warn`/`--danger`/`--info` sat at 2.2–4.1:1 as text; darkened to
-    `#117a55` / `#8f5c0f` / `#c0332d` / `#2b66c2` — all now ≥ 4.5:1 on every light surface
-    including `--raised`. (`--text-faint` is intentionally sub-AA: decorative only.)
+- **Keyboard workflow: Pass.** With the mouse unused: Cmd-T opened a repo, Cmd-B created
+  `qa-keyboard`, Space staged three files with auto-advance, the summary was entered through Tab,
+  Cmd-Return created commit `9cd6b61`, and Cmd-Shift-P published it to a local bare remote.
+- **Focus: Fixed.** Dialog/popover entry now uses `focusOnMount`; `svelte-check` has no autofocus
+  warnings. Browser-computed focus style is a 2px accent outline with 1px offset.
+- **Icon names: Pass.** `npm run check:a11y-icons` scans all 49 Svelte components and passes.
+  Native accessibility trees also exposed names for every icon-only control encountered.
+- **Reduced motion: Fixed.** Motion tokens collapse under `prefers-reduced-motion`; CSS animations,
+  transitions and smooth scrolling are suppressed. Loading loops use the documented loop token and
+  AI ellipsis stops cycling.
+- **Contrast: Fixed.** `npm run check:contrast` checks semantic/status tokens against all four
+  surfaces in both themes. Minimums: dark 4.62:1 (`text-faint`/overlay), light 4.54:1
+  (`text-faint`/raised); all pairs meet WCAG AA.
+- **Semantics/hit targets: Pass.** Canvas is `aria-hidden`; the virtualized DOM grid owns graph
+  semantics. Icon controls include help text and status colors retain glyphs/text.
 
-<details><summary>Contrast script (node)</summary>
+## Performance (§13)
 
-```js
-const lum = h => { const c=[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)/255)
-  .map(v=>v<=0.03928?v/12.92:((v+0.055)/1.055)**2.4);
-  return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2]; };
-const ratio=(a,b)=>{const[x,y]=[lum(a),lum(b)].sort((p,q)=>q-p);return(x+0.05)/(y+0.05);};
-// run each --text* / status hue against --bg, --surface, --raised, --overlay per theme
+Repository: `git/git` cloned from GitHub (81,540 commits), then copied into a standalone working
+tree with a shallow boundary at exactly 20,000 reachable commits for repeatable measurements.
+
+| Measurement | Budget | Result |
+| --- | ---: | ---: |
+| Git topology + lane assignment, 20k | supporting metric | 0.35s (0.23s Git, 0.12s lanes) |
+| Watcher event → visible UI | <1s | 519ms |
+| Startup → graph, 5k budget | <1.5s | **Deviation:** native debug/CUA measurement was not stable enough for a defensible release number; core 20k pipeline is 0.35s |
+| Scroll at 20k | 60fps | **Deviation:** native CUA full-tree capture perturbed WebKit during the 20k run; canvas remains one rAF draw with virtual rows, but a release-build frame trace is still required |
+
+The worst measured offender was fixed: straight lanes previously materialised 2,155,977 repeated
+per-row pass entries (and 2,205,360 total segment objects in the initial representation). They now
+use 9,774 merged spans plus 49,383 real transition objects, grouped by lane and batch-stroked by the
+eight palette colors. Immutable snapshots use raw Svelte state, and topology crosses IPC as a
+compact line payload rather than a nested bridge object graph. Re-run with:
+
+```sh
+npm run audit:graph -- /path/to/20k/repo
 ```
-</details>
 
-## Cross-platform (ARCHITECTURE §14)
+## Cross-platform gotchas (§14)
 
-- **CREATE_NO_WINDOW — pass.** Applied on every spawn (git exec ×2, llama-server sidecar).
-- **Path handling — pass.** No string-concatenated filesystem paths found; `std::path` +
-  tauri path APIs throughout.
-- **EOL-only diffs — implemented this pass.** `run_diff` re-checks non-empty diffs with
-  `--ignore-cr-at-eol`; if the diff vanishes, `FileDiff.eolOnly` is set and the viewer shows
-  "Only line endings changed (CRLF ↔ LF)" instead of a wall of fake changes.
-- **libsecret degradation — partial.** The keyring layer tolerates a missing secret service
-  (documented in `credentials.rs`), but the explicit warning banner is not yet surfaced in
-  the UI. **Deviation, tracked for 0.1.1.**
+- **Windows: Pass (code inspection).** Every Git/AI child process uses `CREATE_NO_WINDOW` under
+  `cfg(windows)`; paths use `Path`/`PathBuf` and UI normalisation supports both separators.
+- **EOL-only diffs: Pass.** The backend retries with `--ignore-cr-at-eol`; the diff viewer shows the
+  quiet line-ending-only note instead of a full-file change.
+- **Linux secrets: Fixed.** When libsecret/keyring is unavailable, secrets fall back to zeroized
+  process memory and the app displays a non-persistent-storage warning banner.
+- **All platforms: Pass (code inspection).** Tauri path APIs provide app directories; no UI path
+  assumes `~`. The only home-directory lookup is for conventional SSH key discovery.
 
-## Performance (ARCHITECTURE §13) — manual
+## Release and verification
 
-Budgets (startup→graph <1.5s @5k, scroll 60fps @20k, watcher→UI <1s, keypress→paint <50ms)
-could not be measured in this environment (no Rust toolchain/display). The architecture-level
-guarantees are in place: topology-once + windowed metadata, single-rAF canvas redraws, avatar
-ImageBitmap LRU, virtualized lists, visible-row-only CI checks. **To measure:** clone a large
-OSS repo, `npm run tauri dev`, and use the WebView performance panel while scrolling; record
-numbers here.
+- Version is `0.1.0` in npm, Cargo and Tauri configuration.
+- `release.yml` uses `tauri-apps/tauri-action` on `v*` tags and explicitly requests DMG (arm64 and
+  x64), MSI, AppImage and DEB bundles. Hyphenated tags are prereleases.
+- README includes features, per-OS install notes, real screenshots, contributing/AGPL notes and the
+  GitKraken non-affiliation statement. CHANGELOG contains the 0.1.0 release.
+- Local required checks are recorded after the final run below. Remote three-OS CI and RC artifact
+  confirmation require the branch/tag push and are updated when GitHub accepts it.
 
-## Not verified here (run before tagging v0.1.0)
+Final local run:
 
-- `cargo test` + `cargo clippy -- -D warnings` in `src-tauri` — the Rust-side changes of this
-  pass (serde `rename_all_fields`, `origin/HEAD` ref filter, `list_remotes`, error-catalog
-  entry, `eol_only` diff probe, model pin constants) compile-checked only by inspection.
-- Frontend verified: `svelte-check` 0 errors, `vitest` 127/127 green.
-- The v0.1.0 release flow itself (`release.yml`) runs on the first pushed tag; artifacts land
-  in a draft release for manual inspection.
-- Known pre-existing wart: the repo's initial commit message contains a Co-Authored-By
-  trailer; rewriting pushed history is the maintainer's call.
+- `npm run build` — pass (bundle-size advisory only).
+- `npx vitest run` — 127/127 pass.
+- `npx svelte-check` — 0 errors, 0 warnings.
+- `cargo test` — 145 unit tests plus all integration suites pass.
+- `cargo clippy --all-targets -- -D warnings` — pass.
+- `npm run check:a11y-icons` and `npm run check:contrast` — pass.
+
+## Spec deviations
+
+- **Motion loop token:** indeterminate loading indicators retain a controlled loop in normal mode;
+  reduced-motion mode suppresses them. This is documented with `SPEC-DEVIATION` at the token.
+- **Local model pin:** the shipped managed model is Gemma 4 E2B rather than the older Gemma 3 1B
+  wording in the design spec; the existing product/model pin is retained and documented in code.
+- **WIP commit morph:** canvas virtualization cannot FLIP the DOM WIP row into a canvas commit node;
+  the existing slide/success-sweep approximation remains documented in `GraphView`.

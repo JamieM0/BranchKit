@@ -1,6 +1,11 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCommitMeta, getGraph, getRefs, getWorktrees, onRepoChanged } from "$lib/ipc";
-import { assignLanes, type GraphLaneRow, type LaneAssignment } from "$lib/graph/lanes";
+import {
+	assignLanes,
+	type GraphLaneRow,
+	type LaneAssignment,
+	type LanePassSpan,
+} from "$lib/graph/lanes";
 import { buildPills, type Pill } from "$lib/graph/pills";
 import type {
 	ChangeKind,
@@ -66,9 +71,12 @@ function uniqueMissingCommitShas(
 
 export class GraphStore {
 	repoId: string | null = $state(null);
-	topology: GraphTopologyRow[] = $state([]);
-	laneRows: GraphLaneRow[] = $state([]);
-	laneColors: number[] = $state([]);
+	// These payloads are immutable snapshots replaced as a unit. Deep-proxying a 20k+ topology
+	// recursively wraps millions of canvas segment objects and can turn a sub-second load into a
+	// multi-minute stall. Raw state preserves replacement reactivity without touching every edge.
+	laneRows: GraphLaneRow[] = $state.raw([]);
+	laneColors: number[] = $state.raw([]);
+	passSpansByLane: LanePassSpan[][] = $state.raw([]);
 	metaBySha: Record<string, CommitMeta> = $state({});
 	refsBySha: Record<string, RefInfo[]> = $state({});
 	/** Flat ref list (LOCAL/REMOTES/TAGS in the left panel) — DESIGN_SPEC §5. */
@@ -129,9 +137,9 @@ export class GraphStore {
 			this.#unlisten = null;
 		}
 		this.repoId = null;
-		this.topology = [];
 		this.laneRows = [];
 		this.laneColors = [];
+		this.passSpansByLane = [];
 		this.metaBySha = {};
 		this.refsBySha = {};
 		this.refs = [];
@@ -146,9 +154,9 @@ export class GraphStore {
 		const topology = await this.#deps.getGraph(this.repoId);
 		const assignment = this.#deps.assignLanes(topology);
 		this.laneComputeCount += 1;
-		this.topology = topology;
 		this.laneRows = assignment.rows;
 		this.laneColors = assignment.laneColors;
+		this.passSpansByLane = assignment.passSpansByLane;
 		this.metaBySha = {};
 		this.#metaInFlight.clear();
 	}

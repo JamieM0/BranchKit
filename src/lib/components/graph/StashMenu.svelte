@@ -112,7 +112,7 @@
 	.actions .danger-solid {
 		background: var(--danger);
 		border-color: var(--danger);
-		color: #fff;
+		color: var(--bg);
 		font-weight: 600;
 	}
 </style>

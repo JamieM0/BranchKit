@@ -41,15 +41,21 @@
   import { prPanel } from "$lib/stores/prPanel.svelte";
   import { createPrDraft } from "$lib/stores/createPrDraft.svelte";
   import * as actions from "$lib/actions";
+  import { credentialStorageStatus } from "$lib/ipc";
 
   let showPicker = $state(false);
   let showClone = $state(false);
+  let credentialWarning = $state<string | null>(null);
 
   // Settings + GitHub connection are app-wide, not per-repo — load once at startup.
   $effect(() => {
     void appSettings.load();
     void github.checkConnection();
     void ai.init();
+    void credentialStorageStatus().then(
+      (status) => (credentialWarning = status.warning),
+      () => (credentialWarning = null),
+    );
   });
 
   // ARCHITECTURE.md §9/§14: once offline, retry a fetch as soon as the window regains focus
@@ -215,6 +221,9 @@
 {:else}
   <div class="shell">
     <RepoTabs onPick={openPicker} />
+    {#if credentialWarning}
+      <div class="credential-banner" role="status">{credentialWarning}</div>
+    {/if}
     {#if network.offline}
       <div class="offline-banner" role="status">
         BranchKit can't reach the network — changes here still work, sync will resume once
@@ -288,6 +297,14 @@
   }
 
   .offline-banner {
+    padding: var(--space-1) var(--space-3);
+    font-size: 12px;
+    color: var(--warn);
+    background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+    border-bottom: 1px solid var(--border);
+  }
+
+  .credential-banner {
     padding: var(--space-1) var(--space-3);
     font-size: 12px;
     color: var(--warn);

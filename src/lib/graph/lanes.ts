@@ -58,6 +58,12 @@ export interface LaneAssignment {
 	rows: GraphLaneRow[];
 	laneColors: number[];
 	maxLane: number;
+	passSpansByLane: LanePassSpan[][];
+}
+
+export interface LanePassSpan {
+	startRow: number;
+	endRow: number;
 }
 
 export const GRAPH_LANE_PALETTE_SIZE = 8;
@@ -77,30 +83,41 @@ function compactTrailingNulls(lanes: (string | null)[]) {
 	while (lanes.at(-1) === null) lanes.pop();
 }
 
-function through(lane: number): GraphSegment {
-	return {
-		from: { at: "top", lane },
-		to: { at: "bottom", lane },
-		colorIndex: laneColorIndex(lane),
-	};
+function updatePassSpans(
+	lanes: readonly (string | null)[],
+	excludedSha: string | undefined,
+	rowIndex: number,
+	openStarts: (number | null)[],
+	spansByLane: LanePassSpan[][],
+) {
+	const length = Math.max(lanes.length, openStarts.length);
+	for (let lane = 0; lane < length; lane += 1) {
+		const active = lane < lanes.length && lanes[lane] !== null && lanes[lane] !== excludedSha;
+		if (active && openStarts[lane] == null) openStarts[lane] = rowIndex;
+		if (!active && openStarts[lane] != null) {
+			(spansByLane[lane] ??= []).push({ startRow: openStarts[lane]!, endRow: rowIndex - 1 });
+			openStarts[lane] = null;
+		}
+	}
 }
 
 export function assignLanes(topology: readonly GraphTopologyRow[]): LaneAssignment {
 	const lanes: (string | null)[] = [];
 	const commitLanes = new Map<string, number>();
 	const rows: GraphLaneRow[] = [];
+	const passSpansByLane: LanePassSpan[][] = [];
+	const openPassStarts: (number | null)[] = [];
 	let maxLane = 0;
 
-	for (const row of topology) {
+	for (let rowIndex = 0; rowIndex < topology.length; rowIndex += 1) {
+		const row = topology[rowIndex];
 		if (row.kind === "stash") {
 			const lane = commitLanes.get(row.baseSha) ?? 0;
 			maxLane = Math.max(maxLane, lane);
 			// Every active lane runs straight through the stash pseudo-row; the stash itself hangs off
 			// its base commit (directly above) on a short dashed connector.
+			updatePassSpans(lanes, undefined, rowIndex, openPassStarts, passSpansByLane);
 			const segments: GraphSegment[] = [];
-			for (let i = 0; i < lanes.length; i += 1) {
-				if (lanes[i] !== null) segments.push(through(i));
-			}
 			segments.push({
 				from: { at: "top", lane },
 				to: { at: "node" },
@@ -171,9 +188,7 @@ export function assignLanes(topology: readonly GraphTopologyRow[]): LaneAssignme
 				colorIndex: laneColorIndex(i),
 			});
 		}
-		for (let i = 0; i < before.length; i += 1) {
-			if (before[i] !== null && before[i] !== row.sha) segments.push(through(i));
-		}
+		updatePassSpans(before, row.sha, rowIndex, openPassStarts, passSpansByLane);
 		if (firstParent) {
 			segments.push({
 				from: { at: "node" },
@@ -198,7 +213,8 @@ export function assignLanes(topology: readonly GraphTopologyRow[]): LaneAssignme
 			segments,
 		});
 	}
+	updatePassSpans([], undefined, topology.length, openPassStarts, passSpansByLane);
 
 	const laneColors = Array.from({ length: maxLane + 1 }, (_, lane) => laneColorIndex(lane));
-	return { rows, laneColors, maxLane };
+	return { rows, laneColors, maxLane, passSpansByLane };
 }

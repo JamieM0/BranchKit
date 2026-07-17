@@ -10,6 +10,7 @@
 		TrayArrowUp,
 	} from "phosphor-svelte";
 	import * as actions from "$lib/actions";
+	import { focusOnMount } from "$lib/focus";
 	import * as ipc from "$lib/ipc";
 	import { graph } from "$lib/stores/graph.svelte";
 	import { branchEdit } from "$lib/stores/branchEdit.svelte";
@@ -267,7 +268,7 @@
 						<input
 							type="text"
 							bind:value={createRepoName}
-							autofocus
+							use:focusOnMount
 							onkeydown={(e) => e.key === "Enter" && submitCreateRepo()}
 						/>
 					</label>
@@ -328,7 +329,7 @@
 					type="text"
 					placeholder="Stash message…"
 					bind:value={stashMessage}
-					autofocus
+					use:focusOnMount
 					onkeydown={(e) => e.key === "Enter" && submitStashMessage()}
 				/>
 				<div class="message-actions">

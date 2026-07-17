@@ -261,7 +261,7 @@
 
   .progress-fill.indeterminate {
     width: 40%;
-    animation: indeterminate 1.2s ease-in-out infinite;
+    animation: indeterminate var(--motion-loop) ease-in-out infinite;
   }
 
   @keyframes indeterminate {
