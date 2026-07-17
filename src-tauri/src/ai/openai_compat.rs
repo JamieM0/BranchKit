@@ -66,7 +66,9 @@ pub async fn stream_chat(
 /// Parses one `data: {...}` SSE line from an OpenAI-compatible stream into its token text, if
 /// any (`data: [DONE]` and non-`data:` lines yield `None`).
 fn parse_sse_data_line(line: &str) -> Option<String> {
-    let data = line.strip_prefix("data: ").or_else(|| line.strip_prefix("data:"))?;
+    let data = line
+        .strip_prefix("data: ")
+        .or_else(|| line.strip_prefix("data:"))?;
     let data = data.trim();
     if data.is_empty() || data == "[DONE]" {
         return None;

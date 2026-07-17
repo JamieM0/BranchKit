@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import {
+  open as openDialog,
+  save as saveDialog,
+} from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   AiTestResult,
@@ -22,6 +25,7 @@ import type {
   FileDiff,
   FileHistoryEntry,
   GeneratedCommitMessage,
+  GeneratedCommitExplanation,
   GitIdentity,
   GithubOrg,
   GithubUser,
@@ -68,7 +72,10 @@ export async function checkGitIdentity(): Promise<GitIdentity> {
   return invoke("check_git_identity");
 }
 
-export async function setGitIdentity(name: string, email: string): Promise<void> {
+export async function setGitIdentity(
+  name: string,
+  email: string,
+): Promise<void> {
   return invoke("set_git_identity", { name, email });
 }
 
@@ -93,7 +100,10 @@ export async function getGraph(repoId: string): Promise<GraphTopologyRow[]> {
     });
 }
 
-export async function getCommitMeta(repoId: string, shas: string[]): Promise<CommitMeta[]> {
+export async function getCommitMeta(
+  repoId: string,
+  shas: string[],
+): Promise<CommitMeta[]> {
   return invoke("get_commit_meta", { repoId, shas });
 }
 
@@ -118,7 +128,11 @@ export async function createWorktree(
 
 /** Removes a linked worktree; `force` bypasses git's own dirty-check guard — call once without it,
  * and only retry with `force: true` after the user confirms the armed "Remove anyway". */
-export async function removeWorktree(repoId: string, path: string, force: boolean): Promise<void> {
+export async function removeWorktree(
+  repoId: string,
+  path: string,
+  force: boolean,
+): Promise<void> {
   return invoke("remove_worktree", { repoId, path, force });
 }
 
@@ -129,7 +143,10 @@ export async function pruneWorktrees(repoId: string): Promise<void> {
 
 // --- file history & blame (ARCHITECTURE.md §5.1-style follow, DESIGN_SPEC.md §6.3) ---
 
-export async function getFileHistory(repoId: string, path: string): Promise<FileHistoryEntry[]> {
+export async function getFileHistory(
+  repoId: string,
+  path: string,
+): Promise<FileHistoryEntry[]> {
   return invoke("get_file_history", { repoId, path });
 }
 
@@ -141,19 +158,28 @@ export async function getFileHistoryDiff(
   return invoke("get_file_history_diff", { repoId, path, sha });
 }
 
-export async function getBlame(repoId: string, path: string): Promise<BlameRun[]> {
+export async function getBlame(
+  repoId: string,
+  path: string,
+): Promise<BlameRun[]> {
   return invoke("get_blame", { repoId, path });
 }
 
 // --- mutations (ARCHITECTURE.md §7.1) — each runs through the repo op queue in Rust and emits its
 // own targeted refresh event on success. ---
 
-export async function checkoutBranch(repoId: string, name: string): Promise<void> {
+export async function checkoutBranch(
+  repoId: string,
+  name: string,
+): Promise<void> {
   return invoke("checkout_branch", { repoId, name });
 }
 
 /** Create-tracking-branch-and-checkout in one action; resolves to the new local branch name. */
-export async function checkoutRemote(repoId: string, remoteRef: string): Promise<string> {
+export async function checkoutRemote(
+  repoId: string,
+  remoteRef: string,
+): Promise<string> {
   return invoke("checkout_remote", { repoId, remoteRef });
 }
 
@@ -161,7 +187,10 @@ export async function checkoutPrevious(repoId: string): Promise<void> {
   return invoke("checkout_previous", { repoId });
 }
 
-export async function checkoutDetached(repoId: string, sha: string): Promise<void> {
+export async function checkoutDetached(
+  repoId: string,
+  sha: string,
+): Promise<void> {
   return invoke("checkout_detached", { repoId, sha });
 }
 
@@ -183,11 +212,19 @@ export async function renameBranch(
 }
 
 /** Deletes a branch; resolves to its recorded tip sha so a toast can Undo (recreate at it). */
-export async function deleteBranch(repoId: string, name: string, force: boolean): Promise<string> {
+export async function deleteBranch(
+  repoId: string,
+  name: string,
+  force: boolean,
+): Promise<string> {
   return invoke("delete_branch", { repoId, name, force });
 }
 
-export async function recreateBranch(repoId: string, name: string, sha: string): Promise<void> {
+export async function recreateBranch(
+  repoId: string,
+  name: string,
+  sha: string,
+): Promise<void> {
   return invoke("recreate_branch", { repoId, name, sha });
 }
 
@@ -216,11 +253,18 @@ export async function fetchAll(repoId: string): Promise<void> {
   return invoke("fetch_all", { repoId });
 }
 
-export async function pull(repoId: string, mode: "ff" | "rebase" | "merge"): Promise<void> {
+export async function pull(
+  repoId: string,
+  mode: "ff" | "rebase" | "merge",
+): Promise<void> {
   return invoke("pull", { repoId, mode });
 }
 
-export async function push(repoId: string, force: boolean, branch: string): Promise<void> {
+export async function push(
+  repoId: string,
+  force: boolean,
+  branch: string,
+): Promise<void> {
   return invoke("push", { repoId, force, branch });
 }
 
@@ -232,7 +276,10 @@ export async function publish(repoId: string, name: string): Promise<void> {
 
 /** Stash, checkout `name`, then pop — the "would be overwritten by checkout" error's suggested
  * compound action (ARCHITECTURE.md §9). */
-export async function checkoutStashAndSwitch(repoId: string, name: string): Promise<void> {
+export async function checkoutStashAndSwitch(
+  repoId: string,
+  name: string,
+): Promise<void> {
   return invoke("checkout_stash_and_switch", { repoId, name });
 }
 
@@ -244,7 +291,10 @@ export async function setUpstream(
   return invoke("set_upstream", { repoId, branch, upstream });
 }
 
-export async function branchDivergence(repoId: string, branch: string): Promise<Divergence> {
+export async function branchDivergence(
+  repoId: string,
+  branch: string,
+): Promise<Divergence> {
   return invoke("branch_divergence", { repoId, branch });
 }
 
@@ -279,7 +329,18 @@ export async function deleteTag(repoId: string, name: string): Promise<void> {
   return invoke("delete_tag", { repoId, name });
 }
 
-export async function getRemoteUrl(repoId: string, remote: string): Promise<string> {
+/** Deletes only the local tag; a published tag on origin is left intact. */
+export async function deleteLocalTag(
+  repoId: string,
+  name: string,
+): Promise<void> {
+  return invoke("delete_local_tag", { repoId, name });
+}
+
+export async function getRemoteUrl(
+  repoId: string,
+  remote: string,
+): Promise<string> {
   return invoke("get_remote_url", { repoId, remote });
 }
 
@@ -288,11 +349,18 @@ export async function listRemotes(repoId: string): Promise<string[]> {
   return invoke("list_remotes", { repoId });
 }
 
-export async function addRemote(repoId: string, name: string, url: string): Promise<void> {
+export async function addRemote(
+  repoId: string,
+  name: string,
+  url: string,
+): Promise<void> {
   return invoke("add_remote", { repoId, name, url });
 }
 
-export async function ignorePath(repoId: string, pattern: string): Promise<void> {
+export async function ignorePath(
+  repoId: string,
+  pattern: string,
+): Promise<void> {
   return invoke("ignore_path", { repoId, pattern });
 }
 
@@ -306,19 +374,31 @@ export async function stashPush(
   return invoke("stash_push", { repoId, message, includeUntracked });
 }
 
-export async function stashPop(repoId: string, selector: string): Promise<void> {
+export async function stashPop(
+  repoId: string,
+  selector: string,
+): Promise<void> {
   return invoke("stash_pop", { repoId, selector });
 }
 
-export async function stashApply(repoId: string, selector: string): Promise<void> {
+export async function stashApply(
+  repoId: string,
+  selector: string,
+): Promise<void> {
   return invoke("stash_apply", { repoId, selector });
 }
 
-export async function stashDrop(repoId: string, selector: string): Promise<void> {
+export async function stashDrop(
+  repoId: string,
+  selector: string,
+): Promise<void> {
   return invoke("stash_drop", { repoId, selector });
 }
 
-export async function getStashPatch(repoId: string, selector: string): Promise<string> {
+export async function getStashPatch(
+  repoId: string,
+  selector: string,
+): Promise<string> {
   return invoke("get_stash_patch", { repoId, selector });
 }
 
@@ -391,7 +471,11 @@ export async function discardFile(repoId: string, path: string): Promise<void> {
   return invoke("discard_file", { repoId, path });
 }
 
-export async function discardHunk(repoId: string, path: string, hunkIndex: number): Promise<void> {
+export async function discardHunk(
+  repoId: string,
+  path: string,
+  hunkIndex: number,
+): Promise<void> {
   return invoke("discard_hunk", { repoId, path, hunkIndex });
 }
 
@@ -403,21 +487,29 @@ export async function listDiscarded(repoId: string): Promise<DiscardedEntry[]> {
   return invoke("list_discarded", { repoId });
 }
 
-export async function restoreDiscarded(repoId: string, entryId: string): Promise<void> {
+export async function restoreDiscarded(
+  repoId: string,
+  entryId: string,
+): Promise<void> {
   return invoke("restore_discarded", { repoId, entryId });
 }
 
 // --- conflicts / Keep Panel (ARCHITECTURE.md §7.4/§7.5, DESIGN_SPEC.md §9) ---
 
 /** `null` when the working tree has no conflict of any kind active. */
-export async function getConflictState(repoId: string): Promise<ConflictState | null> {
+export async function getConflictState(
+  repoId: string,
+): Promise<ConflictState | null> {
   return invoke("get_conflict_state", { repoId });
 }
 
 /** Continue the in-progress operation — the banner's "Continue merge" (and rebase/cherry-pick/
  * revert equivalents), DESIGN_SPEC.md §9.1/§9.2. `message` edits the merge commit's message (the
  * inline field); it's ignored by the kinds whose `--continue` reuses a stored message. */
-export async function continueConflict(repoId: string, message?: string): Promise<void> {
+export async function continueConflict(
+  repoId: string,
+  message?: string,
+): Promise<void> {
   return invoke("continue_conflict", { repoId, message: message ?? null });
 }
 
@@ -427,13 +519,20 @@ export async function abortConflict(repoId: string): Promise<void> {
 }
 
 /** A conflicted file's Keep Panel regions (ARCHITECTURE.md §7.5). */
-export async function getConflictRegions(repoId: string, path: string): Promise<FileConflictRegions> {
+export async function getConflictRegions(
+  repoId: string,
+  path: string,
+): Promise<FileConflictRegions> {
   return invoke("get_conflict_regions", { repoId, path });
 }
 
 /** Writes the Keep Panel's assembled resolved text and stages it — the panel's Confirm button
  * (DESIGN_SPEC.md §9.2). */
-export async function confirmFile(repoId: string, path: string, resolvedText: string): Promise<void> {
+export async function confirmFile(
+  repoId: string,
+  path: string,
+  resolvedText: string,
+): Promise<void> {
   return invoke("confirm_file", { repoId, path, resolvedText });
 }
 
@@ -476,14 +575,27 @@ export async function getDiffTwoCommits(
   path: string,
   ignoreWhitespace: boolean,
 ): Promise<FileDiff> {
-  return invoke("get_diff_two_commits", { repoId, a, b, path, ignoreWhitespace });
+  return invoke("get_diff_two_commits", {
+    repoId,
+    a,
+    b,
+    path,
+    ignoreWhitespace,
+  });
 }
 
-export async function getCommitFiles(repoId: string, sha: string): Promise<ChangedFile[]> {
+export async function getCommitFiles(
+  repoId: string,
+  sha: string,
+): Promise<ChangedFile[]> {
   return invoke("get_commit_files", { repoId, sha });
 }
 
-export async function getDiffFiles(repoId: string, a: string, b: string): Promise<ChangedFile[]> {
+export async function getDiffFiles(
+  repoId: string,
+  a: string,
+  b: string,
+): Promise<ChangedFile[]> {
   return invoke("get_diff_files", { repoId, a, b });
 }
 
@@ -494,15 +606,26 @@ export async function getDiffCommitVsWorking(
   path: string,
   ignoreWhitespace: boolean,
 ): Promise<FileDiff> {
-  return invoke("get_diff_commit_vs_working", { repoId, sha, path, ignoreWhitespace });
+  return invoke("get_diff_commit_vs_working", {
+    repoId,
+    sha,
+    path,
+    ignoreWhitespace,
+  });
 }
 
-export async function getCommitFilesVsWorking(repoId: string, sha: string): Promise<ChangedFile[]> {
+export async function getCommitFilesVsWorking(
+  repoId: string,
+  sha: string,
+): Promise<ChangedFile[]> {
   return invoke("get_commit_files_vs_working", { repoId, sha });
 }
 
 /** A whole commit as a mailbox-format patch — "Create patch from commit" (§2.9/§3.1). */
-export async function createPatchFromCommit(repoId: string, sha: string): Promise<string> {
+export async function createPatchFromCommit(
+  repoId: string,
+  sha: string,
+): Promise<string> {
   return invoke("create_patch_from_commit", { repoId, sha });
 }
 
@@ -523,7 +646,11 @@ export async function getBlob(
   revision: string | null,
   path: string,
 ): Promise<string> {
-  const blob = await invoke<{ base64: string }>("get_blob", { repoId, revision, path });
+  const blob = await invoke<{ base64: string }>("get_blob", {
+    repoId,
+    revision,
+    path,
+  });
   return blob.base64;
 }
 
@@ -532,7 +659,9 @@ export async function onRepoChanged(
   id: string,
   handler: (kind: ChangeKind) => void,
 ): Promise<UnlistenFn> {
-  return listen<ChangeKind>(`repo://${id}/changed`, (event) => handler(event.payload));
+  return listen<ChangeKind>(`repo://${id}/changed`, (event) =>
+    handler(event.payload),
+  );
 }
 
 /** Subscribes to a clone's progress stream — see the SPEC-DEVIATION note on `clone_repo` in
@@ -551,8 +680,14 @@ export async function pickFolder(title: string): Promise<string | null> {
 }
 
 /** Native "Save patch as…" dialog + write — "Create patch from commit/file" (§2.9/§3.1/§3.4). */
-export async function savePatchAs(defaultName: string, contents: string): Promise<boolean> {
-  const path = await saveDialog({ defaultPath: defaultName, filters: [{ name: "Patch", extensions: ["patch"] }] });
+export async function savePatchAs(
+  defaultName: string,
+  contents: string,
+): Promise<boolean> {
+  const path = await saveDialog({
+    defaultPath: defaultName,
+    filters: [{ name: "Patch", extensions: ["patch"] }],
+  });
   if (!path) return false;
   await invoke("save_text_file", { path, contents });
   return true;
@@ -589,13 +724,20 @@ export async function credentialStorageStatus(): Promise<CredentialStorageStatus
   return invoke("credential_storage_status");
 }
 
-export async function removeCredential(host: string, username: string): Promise<void> {
+export async function removeCredential(
+  host: string,
+  username: string,
+): Promise<void> {
   return invoke("remove_credential", { host, username });
 }
 
 /** Saves a credential entered in the auth-failure dialog; the caller retries the failed op once
  * right after (ARCHITECTURE.md §8). */
-export async function saveCredential(host: string, username: string, password: string): Promise<void> {
+export async function saveCredential(
+  host: string,
+  username: string,
+  password: string,
+): Promise<void> {
   return invoke("save_credential", { host, username, password });
 }
 
@@ -637,7 +779,10 @@ export async function listPullRequests(repoId: string): Promise<PullRequest[]> {
   return invoke("list_pull_requests", { repoId });
 }
 
-export async function getCheckStatus(repoId: string, sha: string): Promise<CommitCheckStatus> {
+export async function getCheckStatus(
+  repoId: string,
+  sha: string,
+): Promise<CommitCheckStatus> {
   return invoke("get_check_status", { repoId, sha });
 }
 
@@ -661,7 +806,10 @@ export async function mergePullRequest(
 
 /** Fetches the PR's head (works for fork PRs via `pull/<n>/head`) and checks it out; resolves to
  * the local branch name it created (`pr-<n>`). */
-export async function checkoutPrHead(repoId: string, number: number): Promise<string> {
+export async function checkoutPrHead(
+  repoId: string,
+  number: number,
+): Promise<string> {
   return invoke("checkout_pr_head", { repoId, number });
 }
 
@@ -692,8 +840,27 @@ export async function generateCommitMessage(
 }
 
 /** Subscribes to raw token text as the ✨ commit-message generation streams (DESIGN_SPEC.md §7). */
-export async function onAiCommitToken(handler: (token: string) => void): Promise<UnlistenFn> {
+export async function onAiCommitToken(
+  handler: (token: string) => void,
+): Promise<UnlistenFn> {
   return listen<string>("ai://commit/token", (event) => handler(event.payload));
+}
+
+/** Explains the entire historical commit in one AI request. Tokens stream independently from the
+ * commit-message composer so the two UI flows can never interleave their output. */
+export async function explainCommit(
+  repoId: string,
+  sha: string,
+): Promise<GeneratedCommitExplanation> {
+  return invoke("explain_commit", { repoId, sha });
+}
+
+export async function onAiExplanationToken(
+  handler: (token: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("ai://explanation/token", (event) =>
+    handler(event.payload),
+  );
 }
 
 export async function getLocalModelState(): Promise<LocalModelState> {
@@ -718,7 +885,10 @@ export async function removeLocalModel(): Promise<void> {
 export async function onLocalDownloadProgress(
   handler: (progress: LocalDownloadProgress) => void,
 ): Promise<UnlistenFn> {
-  return listen<LocalDownloadProgress>("ai://local/download-progress", (event) => handler(event.payload));
+  return listen<LocalDownloadProgress>(
+    "ai://local/download-progress",
+    (event) => handler(event.payload),
+  );
 }
 
 /** The Ollama model dropdown's data source (DESIGN_SPEC.md §13). */
@@ -732,7 +902,9 @@ export async function pingOllama(baseUrl: string): Promise<boolean> {
 }
 
 /** Settings → AI → Remote API's Test button; sends a minimal live request (DESIGN_SPEC.md §13). */
-export async function testRemoteConnection(settings: AppSettings["ai"]): Promise<AiTestResult> {
+export async function testRemoteConnection(
+  settings: AppSettings["ai"],
+): Promise<AiTestResult> {
   return invoke("test_remote_connection", { settings });
 }
 

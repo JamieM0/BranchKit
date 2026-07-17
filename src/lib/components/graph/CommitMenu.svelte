@@ -3,6 +3,7 @@
 	import * as actions from "$lib/actions";
 	import { focusOnMount } from "$lib/focus";
 	import { worktreeDialog } from "$lib/stores/worktreeDialog.svelte";
+	import { appSettings } from "$lib/stores/appSettings.svelte";
 
 	/** Commit row right-click menu — GITKRAKEN_WORKFLOWS.md §3.1, DESIGN_SPEC.md §15.30. Everything
 	 * that doesn't need a follow-up prompt runs straight off the menu; Reset Hard gets the
@@ -17,6 +18,7 @@
 		onDismiss,
 		onCreateBranch,
 		onCompareWorking,
+		onExplain,
 	}: {
 		sha: string;
 		repoId: string;
@@ -26,6 +28,7 @@
 		onDismiss: () => void;
 		onCreateBranch: (sha: string) => void;
 		onCompareWorking: (sha: string) => void;
+		onExplain: (sha: string) => void;
 	} = $props();
 
 	let mode = $state<"menu" | "confirmResetHard" | "tag" | "annotatedTag">("menu");
@@ -42,6 +45,15 @@
 	function run(fn: () => void | Promise<void>) {
 		close();
 		void fn();
+	}
+
+	/** The explanation action changes right-panel state synchronously. Keep this menu's props alive
+	 * until that state transition has read `sha`, otherwise Svelte can re-evaluate `commitMenu.sha`
+	 * after `onDismiss` has cleared the menu. */
+	function explain() {
+		const target = sha;
+		onExplain(target);
+		queueMicrotask(close);
 	}
 
 	function startResetHard() {
@@ -77,6 +89,10 @@
 	// "Advanced" flyout so the menu reads at a glance (Jamie's request — the old flat menu had
 	// 13 entries and 5 separators).
 	const items: MenuItem[] = $derived([
+		...(appSettings.current.ai.enabled
+			? ([{ type: "action", label: "Explain this commit", keepOpen: true, run: explain }] satisfies MenuItem[])
+			: []),
+		...(appSettings.current.ai.enabled ? ([{ type: "separator" }] satisfies MenuItem[]) : []),
 		{ type: "action", label: "Checkout this commit", run: () => run(() => actions.checkoutDetached(repoId, sha)) },
 		{ type: "action", label: "Create branch here…", run: () => run(() => onCreateBranch(sha)) },
 		{ type: "separator" },

@@ -20,7 +20,9 @@ pub struct LlamaServerAsset {
 }
 
 fn download_url(asset_name: &str) -> String {
-    format!("https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_CPP_RELEASE}/{asset_name}")
+    format!(
+        "https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_CPP_RELEASE}/{asset_name}"
+    )
 }
 
 /// Picks the asset for the running OS/arch. `None` on a combination llama.cpp doesn't ship a

@@ -130,6 +130,7 @@
 	let menu = $state<{ pill: Pill; x: number; y: number } | null>(null);
 	let stashMenu = $state<{ selector: string; subject: string; x: number; y: number } | null>(null);
 	let tagMenu = $state<{ name: string; x: number; y: number } | null>(null);
+	let checkoutConfirm = $state<Pill | null>(null);
 	let worktreeMenu = $state<{ wt: WorktreeInfo; x: number; y: number } | null>(null);
 	let removeConfirm = $state<{ path: string; armed: boolean } | null>(null);
 	let armTimer: ReturnType<typeof setTimeout> | undefined;
@@ -194,14 +195,17 @@
 		tagMenu = { name, x: e.clientX, y: e.clientY };
 	}
 
-	const tagMenuItems: MenuItem[] = $derived(
-		tagMenu && repoId
-			? [
-					{ type: "action", label: "Copy tag name", run: () => void actions.copyToClipboard(tagMenu!.name, "Copied tag name") },
-					{ type: "action", label: "Delete tag", danger: true, run: () => void actions.deleteTag(repoId!, tagMenu!.name) },
-				]
-			: [],
-	);
+	function itemsForTagMenu(repoId: string, name: string): MenuItem[] {
+		// ContextMenu dismisses itself before calling `run`, so capture the tag name here rather
+		// than reaching back into `tagMenu` after it has been cleared.
+		return [
+			{ type: "action", label: "Copy tag name", run: () => void actions.copyToClipboard(name, "Copied tag name") },
+			{ type: "action", label: "Delete tag", danger: true, run: () => void actions.deleteTag(repoId, name) },
+			{ type: "action", label: "Delete local tag", danger: true, run: () => void actions.deleteLocalTag(repoId, name) },
+		];
+	}
+
+	const tagMenuItems: MenuItem[] = $derived(tagMenu && repoId ? itemsForTagMenu(repoId, tagMenu.name) : []);
 
 	function onRowHover(sha: string | null) {
 		graphNav.setGlow(sha);
@@ -215,6 +219,21 @@
 		if (!repoId) return;
 		if (pill.isRemoteOnly && pill.remoteRef) void actions.checkoutRemote(repoId, pill.remoteRef);
 		else if (pill.localBranch) void actions.checkoutBranch(repoId, pill.localBranch);
+	}
+
+	function requestCheckout(pill: Pill) {
+		if (pill.localBranch === currentBranch) {
+			onRowClick(pill.sha);
+			return;
+		}
+		checkoutConfirm = pill;
+	}
+
+	function confirmCheckout() {
+		if (!checkoutConfirm) return;
+		const pill = checkoutConfirm;
+		checkoutConfirm = null;
+		checkoutPill(pill);
 	}
 
 	function openMenu(pill: Pill, e: MouseEvent) {
@@ -262,8 +281,8 @@
 							class:head-branch={pill.isHead}
 							onmouseenter={() => onRowHover(row.local.sha)}
 							onmouseleave={() => onRowHover(null)}
-							onclick={() => onRowClick(row.local.sha)}
-							ondblclick={() => checkoutPill(pill)}
+							onclick={() => requestCheckout(pill)}
+							ondblclick={() => requestCheckout(pill)}
 							oncontextmenu={(e) => openMenu(pill, e)}
 						>
 							{#if pill.isHead}<span class="dot" aria-label="checked out"></span>{/if}
@@ -305,8 +324,8 @@
 								class="row"
 								onmouseenter={() => onRowHover(branch.sha)}
 								onmouseleave={() => onRowHover(null)}
-								onclick={() => onRowClick(branch.sha)}
-								ondblclick={() => checkoutPill(pill)}
+								onclick={() => requestCheckout(pill)}
+								ondblclick={() => requestCheckout(pill)}
 								oncontextmenu={(e) => openMenu(pill, e)}
 							>
 								<span class="presence" aria-hidden="true"><Cloud size={11} /></span>
@@ -473,6 +492,20 @@
 		onDismiss={() => (worktreeMenu = null)}
 		ariaLabel="Worktree actions"
 	/>
+{/if}
+
+{#if checkoutConfirm}
+	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+	<div class="scrim" onclick={() => (checkoutConfirm = null)}></div>
+	<div class="checkout-confirm" role="dialog" aria-modal="true" aria-label="Check out branch">
+		<p class="confirm-text">
+			Check out <code>{checkoutConfirm.name}</code>{checkoutConfirm.isRemoteOnly ? " and create a local tracking branch" : ""}?
+		</p>
+		<div class="confirm-actions">
+			<button type="button" onclick={() => (checkoutConfirm = null)}>Cancel</button>
+			<button type="button" class="primary-solid" onclick={confirmCheckout}>Check out</button>
+		</div>
+	</div>
 {/if}
 
 {#if removeConfirm}
@@ -677,7 +710,8 @@
 		z-index: 90;
 	}
 
-	.remove-confirm {
+	.remove-confirm,
+	.checkout-confirm {
 		position: fixed;
 		z-index: 91;
 		left: 50%;
@@ -726,6 +760,13 @@
 	.confirm-actions .danger-solid {
 		background: var(--danger);
 		border-color: var(--danger);
+		color: var(--bg);
+		font-weight: 600;
+	}
+
+	.confirm-actions .primary-solid {
+		background: var(--accent);
+		border-color: var(--accent);
 		color: var(--bg);
 		font-weight: 600;
 	}

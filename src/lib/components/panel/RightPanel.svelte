@@ -2,12 +2,14 @@
 	import { graphSelection } from "$lib/stores/graphSelection.svelte";
 	import { prPanel } from "$lib/stores/prPanel.svelte";
 	import { graph } from "$lib/stores/graph.svelte";
+	import { commitExplanation } from "$lib/stores/commitExplanation.svelte";
 	import { status } from "$lib/stores/status.svelte";
 	import WorkingDirectoryPanel from "./WorkingDirectoryPanel.svelte";
 	import CommitDetailPanel from "./CommitDetailPanel.svelte";
 	import ComparePanel from "./ComparePanel.svelte";
 	import PrDetailPanel from "./PrDetailPanel.svelte";
 	import CreatePrPanel from "./CreatePrPanel.svelte";
+	import CommitExplanationPanel from "./CommitExplanationPanel.svelte";
 
 	/** The right panel — DESIGN_SPEC.md §3/§6.1. Mode follows the graph's selection: a Cmd+click
 	 * pair → compare mode; a single commit selected → commit-detail mode; a PR selected (or the
@@ -17,6 +19,11 @@
 	const compare = $derived(graphSelection.compare);
 	const selectedSha = $derived(graphSelection.selectedSha);
 	const repoId = $derived(graph.repoId);
+	const explaining = $derived(
+		commitExplanation.repoId === repoId &&
+			commitExplanation.sha !== null &&
+			commitExplanation.sha === selectedSha,
+	);
 
 	let lastGraphKey: string | null = $state(null);
 	$effect(() => {
@@ -51,7 +58,11 @@
 	{:else if prPanel.selectedNumber !== null && repoId}
 		<PrDetailPanel {repoId} />
 	{:else if selectedSha}
-		<CommitDetailPanel sha={selectedSha} />
+		{#if explaining}
+			<CommitExplanationPanel sha={selectedSha} />
+		{:else}
+			<CommitDetailPanel sha={selectedSha} />
+		{/if}
 	{:else}
 		<WorkingDirectoryPanel />
 	{/if}

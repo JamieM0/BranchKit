@@ -53,7 +53,10 @@ pub async fn download_resumable(
         tokio::fs::create_dir_all(parent).await?;
     }
 
-    let already = tokio::fs::metadata(&part_path).await.map(|m| m.len()).unwrap_or(0);
+    let already = tokio::fs::metadata(&part_path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
 
     let mut request = client.get(url);
     if already > 0 {
@@ -71,14 +74,19 @@ pub async fn download_resumable(
     // whole body from byte 0 — only treat this as a genuine resume if it answered 206.
     let resumed = already > 0 && response.status().as_u16() == 206;
     let mut file = if resumed {
-        let mut f = tokio::fs::OpenOptions::new().append(true).open(&part_path).await?;
+        let mut f = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&part_path)
+            .await?;
         f.seek(SeekFrom::End(0)).await?;
         f
     } else {
         tokio::fs::File::create(&part_path).await?
     };
 
-    let total = response.content_length().map(|len| if resumed { len + already } else { len });
+    let total = response
+        .content_length()
+        .map(|len| if resumed { len + already } else { len });
     let mut downloaded = if resumed { already } else { 0 };
     let mut hasher = Sha256::new();
     if resumed {

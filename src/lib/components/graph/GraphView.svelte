@@ -30,6 +30,7 @@
 	import { graph } from "$lib/stores/graph.svelte";
 	import { status } from "$lib/stores/status.svelte";
 	import { graphSelection } from "$lib/stores/graphSelection.svelte";
+	import { commitExplanation } from "$lib/stores/commitExplanation.svelte";
 	import { graphView } from "$lib/stores/graphView.svelte";
 	import { appSettings } from "$lib/stores/appSettings.svelte";
 	import { buildWipRow, WIP_SHA, type WipRow } from "$lib/graph/wip";
@@ -648,6 +649,12 @@
 		else if (row.kind === "stash") stashMenu = { selector: row.selector, subject: row.subject, x, y };
 	}
 
+	function explainCommit(sha: string) {
+		if (!repoId) return;
+		graphSelection.select(sha);
+		commitExplanation.open(repoId, sha);
+	}
+
 	function compareAgainstWorking(sha: string) {
 		graphSelection.compareAgainstWorking(sha);
 	}
@@ -913,6 +920,7 @@
 		onDismiss={() => (commitMenu = null)}
 		onCreateBranch={startCreateBranch}
 		onCompareWorking={compareAgainstWorking}
+		onExplain={explainCommit}
 	/>
 {/if}
 

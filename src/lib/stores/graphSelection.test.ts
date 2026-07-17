@@ -1,13 +1,26 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { graphSelection } from "./graphSelection.svelte";
+import { commitExplanation } from "./commitExplanation.svelte";
 
 describe("graphSelection", () => {
-	beforeEach(() => graphSelection.clear());
+	beforeEach(() => {
+		graphSelection.clear();
+		commitExplanation.close();
+	});
 
 	it("single-selects and clears compare", () => {
 		graphSelection.select("A");
 		expect(graphSelection.selectedSha).toBe("A");
 		expect(graphSelection.compare).toBeNull();
+	});
+
+	it("closes a commit explanation when selecting another commit", () => {
+		graphSelection.select("A");
+		commitExplanation.open("repo", "A");
+		graphSelection.select("B");
+		graphSelection.select("A");
+		expect(commitExplanation.sha).toBeNull();
+		expect(commitExplanation.repoId).toBeNull();
 	});
 
 	it("cmd-click with a prior selection enters compare mode", () => {

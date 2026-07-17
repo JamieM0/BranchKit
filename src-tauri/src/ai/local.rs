@@ -32,7 +32,9 @@ fn model_path(app: &AppHandle) -> Result<PathBuf, AppError> {
 }
 
 fn server_root(app: &AppHandle) -> Result<PathBuf, AppError> {
-    Ok(ai_dir(app)?.join("llama-server").join(versions::LLAMA_CPP_RELEASE))
+    Ok(ai_dir(app)?
+        .join("llama-server")
+        .join(versions::LLAMA_CPP_RELEASE))
 }
 
 fn pidfile_path(app: &AppHandle) -> Result<PathBuf, AppError> {
@@ -102,7 +104,10 @@ fn emit_progress(app: &AppHandle, phase: &str, downloaded: u64, total: Option<u6
 /// model card's Download → progress state (DESIGN_SPEC.md §13). Cancellable via
 /// `cancel_local_download`; a cancellation leaves whatever `.part` file exists for a later resume.
 #[tauri::command]
-pub async fn download_local_model(app: AppHandle, ai_state: State<'_, AiState>) -> Result<(), AppError> {
+pub async fn download_local_model(
+    app: AppHandle,
+    ai_state: State<'_, AiState>,
+) -> Result<(), AppError> {
     let cancel = Arc::new(AtomicBool::new(false));
     *ai_state
         .download_cancel
@@ -117,7 +122,10 @@ pub async fn download_local_model(app: AppHandle, ai_state: State<'_, AiState>) 
     result
 }
 
-async fn download_local_model_inner(app: &AppHandle, cancel: Arc<AtomicBool>) -> Result<(), AppError> {
+async fn download_local_model_inner(
+    app: &AppHandle,
+    cancel: Arc<AtomicBool>,
+) -> Result<(), AppError> {
     let http = reqwest::Client::new();
 
     let binary_path = server_binary_path(app)?;
@@ -134,10 +142,13 @@ async fn download_local_model_inner(app: &AppHandle, cancel: Arc<AtomicBool>) ->
             versions::LLAMA_CPP_RELEASE,
             asset.asset_name
         );
-        let outcome = download_resumable(&http, &url, &archive_path, asset.sha256, cancel.clone(), {
-            move |downloaded, total, mbps| emit_progress(app, "Downloading llama-server", downloaded, total, mbps)
-        })
-        .await?;
+        let outcome =
+            download_resumable(&http, &url, &archive_path, asset.sha256, cancel.clone(), {
+                move |downloaded, total, mbps| {
+                    emit_progress(app, "Downloading llama-server", downloaded, total, mbps)
+                }
+            })
+            .await?;
         if outcome == DownloadOutcome::Cancelled {
             return Ok(());
         }
@@ -168,7 +179,9 @@ async fn download_local_model_inner(app: &AppHandle, cancel: Arc<AtomicBool>) ->
             &model_path,
             versions::MODEL_SHA256,
             cancel,
-            move |downloaded, total, mbps| emit_progress(app, "Downloading model", downloaded, total, mbps),
+            move |downloaded, total, mbps| {
+                emit_progress(app, "Downloading model", downloaded, total, mbps)
+            },
         )
         .await?;
         if outcome == DownloadOutcome::Cancelled {
@@ -216,7 +229,10 @@ pub fn cancel_local_download(ai_state: State<'_, AiState>) {
 /// re-download) and kills the sidecar if it's running against it — the model card's
 /// "✓ Ready · Remove" (DESIGN_SPEC.md §13).
 #[tauri::command]
-pub async fn remove_local_model(app: AppHandle, ai_state: State<'_, AiState>) -> Result<(), AppError> {
+pub async fn remove_local_model(
+    app: AppHandle,
+    ai_state: State<'_, AiState>,
+) -> Result<(), AppError> {
     kill_sidecar(&ai_state).await;
     let path = model_path(&app)?;
     if path.exists() {
@@ -246,7 +262,12 @@ async fn wait_for_health(port: u16) -> bool {
     let url = format!("http://127.0.0.1:{port}/health");
     let deadline = Instant::now() + HEALTH_POLL_TIMEOUT;
     while Instant::now() < deadline {
-        if client.get(&url).send().await.is_ok_and(|r| r.status().is_success()) {
+        if client
+            .get(&url)
+            .send()
+            .await
+            .is_ok_and(|r| r.status().is_success())
+        {
             return true;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -330,7 +351,8 @@ pub async fn generate(
     let port = ensure_running(app, ai_state).await?;
     let url = format!("http://127.0.0.1:{port}/v1/chat/completions");
     let client = reqwest::Client::new();
-    let result = super::openai_compat::stream_chat(&client, &url, None, "local", messages, on_token).await;
+    let result =
+        super::openai_compat::stream_chat(&client, &url, None, "local", messages, on_token).await;
     *ai_state.last_used.lock().expect("last_used mutex poisoned") = Some(Instant::now());
     result
 }

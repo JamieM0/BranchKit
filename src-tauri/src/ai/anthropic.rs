@@ -85,7 +85,9 @@ pub async fn stream_chat(
 /// Parses one `data: {...}` line from an Anthropic Messages stream into its token text, if the
 /// event is a `content_block_delta` with a `text_delta`.
 fn parse_sse_data_line(line: &str) -> Option<String> {
-    let data = line.strip_prefix("data: ").or_else(|| line.strip_prefix("data:"))?;
+    let data = line
+        .strip_prefix("data: ")
+        .or_else(|| line.strip_prefix("data:"))?;
     let data = data.trim();
     if data.is_empty() {
         return None;

@@ -38,7 +38,12 @@ pub async fn list_ollama_models(base_url: String) -> Result<Vec<String>, AppErro
         .map_err(|e| AppError::new("Ollama returned an error", e.to_string()))?
         .json::<TagsResponse>()
         .await
-        .map_err(|e| AppError::new("Ollama sent back something BranchKit didn't understand", e.to_string()))?;
+        .map_err(|e| {
+            AppError::new(
+                "Ollama sent back something BranchKit didn't understand",
+                e.to_string(),
+            )
+        })?;
     Ok(resp.models.into_iter().map(|m| m.name).collect())
 }
 
@@ -46,7 +51,11 @@ pub async fn list_ollama_models(base_url: String) -> Result<Vec<String>, AppErro
 #[tauri::command]
 pub async fn ping_ollama(base_url: String) -> bool {
     let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
-    client().get(&url).send().await.is_ok_and(|r| r.status().is_success())
+    client()
+        .get(&url)
+        .send()
+        .await
+        .is_ok_and(|r| r.status().is_success())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,9 +71,15 @@ pub async fn generate(
     on_token: impl FnMut(&str) + Send,
 ) -> Result<String, AppError> {
     let model = settings.ollama_model.clone().ok_or_else(|| {
-        AppError::new("No Ollama model selected", "ollama_model is unset in AiSettings")
+        AppError::new(
+            "No Ollama model selected",
+            "ollama_model is unset in AiSettings",
+        )
     })?;
-    let url = format!("{}/v1/chat/completions", settings.ollama_base_url.trim_end_matches('/'));
+    let url = format!(
+        "{}/v1/chat/completions",
+        settings.ollama_base_url.trim_end_matches('/')
+    );
     let http = reqwest::Client::builder()
         .build()
         .expect("static reqwest client config is valid");

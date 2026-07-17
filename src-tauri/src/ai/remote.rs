@@ -41,8 +41,19 @@ pub async fn generate(
     })?;
     match settings.remote_format {
         RemoteApiFormat::OpenAi => {
-            let url = format!("{}/chat/completions", settings.remote_base_url.trim_end_matches('/'));
-            super::openai_compat::stream_chat(&client(), &url, Some(&key), &settings.remote_model, messages, on_token).await
+            let url = format!(
+                "{}/chat/completions",
+                settings.remote_base_url.trim_end_matches('/')
+            );
+            super::openai_compat::stream_chat(
+                &client(),
+                &url,
+                Some(&key),
+                &settings.remote_model,
+                messages,
+                on_token,
+            )
+            .await
         }
         RemoteApiFormat::Anthropic => {
             super::anthropic::stream_chat(
@@ -90,7 +101,10 @@ pub async fn test_remote_connection(settings: AiSettings) -> TestResult {
 pub fn set_remote_api_key(key: String) -> Result<(), AppError> {
     // Trim whitespace/newlines a paste can leave behind — untrimmed, this silently breaks the
     // `Authorization: Bearer <key>` header and the provider just reports a plain 401.
-    Ok(credentials::set_secret(credentials::AI_API_KEY_ACCOUNT, key.trim())?)
+    Ok(credentials::set_secret(
+        credentials::AI_API_KEY_ACCOUNT,
+        key.trim(),
+    )?)
 }
 
 #[tauri::command]
