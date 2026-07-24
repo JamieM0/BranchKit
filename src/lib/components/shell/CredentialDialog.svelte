@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { credentialDialog } from "$lib/stores/credentialDialog.svelte";
+	import { focusOnMount } from "$lib/focus";
 	import { toasts } from "$lib/stores/toasts.svelte";
 	import * as ipc from "$lib/ipc";
 
@@ -49,7 +50,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 	<div class="scrim" onclick={() => credentialDialog.dismiss()} onkeydown={handleKeydown} role="presentation">
 		<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-		<div class="dialog" role="dialog" aria-modal="true" aria-label="Sign in to {credentialDialog.state.host}" onclick={(e) => e.stopPropagation()}>
+		<div class="dialog" role="dialog" aria-modal="true" aria-label="Sign in to {credentialDialog.state.host}" tabindex="-1" onclick={(e) => e.stopPropagation()}>
 			<h2>Sign in to {credentialDialog.state.host}</h2>
 			<p class="hint">Saved to your OS keychain — BranchKit never stores this in a plain file.</p>
 
@@ -59,7 +60,7 @@
 			</label>
 			<label class="field">
 				<span>Username</span>
-				<input type="text" bind:value={username} autocomplete="username" />
+				<input type="text" bind:value={username} autocomplete="username" use:focusOnMount />
 			</label>
 			<label class="field">
 				<span>Password / token</span>

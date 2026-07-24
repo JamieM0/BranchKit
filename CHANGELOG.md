@@ -27,3 +27,14 @@ The first usable BranchKit: a graph-first git client for macOS, Windows and Linu
   any OpenAI-/Anthropic-format API. Optional, off by default.
 - Multi-repo tabs, worktrees, file history + blame, command palette (⌘K), dark + light
   themes, and no accounts, telemetry, or upsells — ever.
+
+### Polish and release readiness
+
+- Completed the 32-point interaction checklist and keyboard-only open → branch → stage →
+  commit → push workflow; added consistent focus entry for dialogs and popovers.
+- Added reduced-motion handling and scripted WCAG AA contrast checks for both themes.
+- Compacted straight graph lanes into merged spans and kept immutable graph snapshots out of
+  Svelte's deep proxy path for large-history performance.
+- Added in-memory Linux credential fallback with an explicit degradation banner when libsecret
+  is unavailable.
+- Added tagged multi-platform release builds for macOS DMG, Windows MSI, Linux AppImage and DEB.

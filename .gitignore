@@ -20,3 +20,4 @@ Cargo.lock.bak
 
 # Docs
 /docs
+AUDIT_FINDINGS.md

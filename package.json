@@ -8,6 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:contrast": "node scripts/check-contrast.mjs",
+    "check:a11y-icons": "node scripts/check-icon-buttons.mjs",
+    "audit:graph": "node --experimental-strip-types scripts/perf-graph.ts",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "test": "vitest run",
     "tauri": "tauri",
@@ -19,6 +22,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2",
     "highlight.js": "^11.11.1",
+    "marked": "^15.0.12",
     "phosphor-svelte": "^3.1.0"
   },
   "devDependencies": {

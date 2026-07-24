@@ -11,7 +11,7 @@
   /* Nudged from #8b91a7 / #ff5c5c so muted text and danger menu items clear AA on --overlay
    * (menus/popovers) too — see the contrast table in docs/QA.md. */
   --text-muted: #959bb0;
-  --text-faint: #5c6274;
+  --text-faint: #9298ad;
   --accent: #3ddc97;
   --accent-dim: #2aa876;
   --info: #6ea8ff;
@@ -19,6 +19,7 @@
   --danger: #ff6b6b;
   --ahead: #3ddc97;
   --behind: #ffb454;
+  --status-deleted: #ff6b6b;
 }
 
 :root[data-theme="light"] {
@@ -30,7 +31,7 @@
   --border-soft: #e4e7f0;
   --text: #1c1f2b;
   --text-muted: #5c6274;
-  --text-faint: #8b91a7;
+  --text-faint: #666d7f;
   /* Status hues darkened for WCAG AA as *text* on every light surface incl. --raised (verified
    * by the contrast script in docs/QA.md — the originals sat at 2.2–4.1:1). */
   --accent: #117a55;
@@ -40,6 +41,14 @@
   --danger: #c0332d;
   --ahead: #117a55;
   --behind: #8f5c0f;
+  /* File-status glyphs are text-sized UI, so the bright shared palette below is darkened on
+   * light surfaces. Glyph shape still carries the status; color never acts alone (§14). */
+  --status-added: #117a55;
+  --status-modified: #8f5c0f;
+  --status-deleted: #c0332d;
+  --status-renamed: #7c3bb0;
+  --status-conflicted: #a82d63;
+  --status-untracked: #2b66c2;
 }
 
 :root {
@@ -83,6 +92,10 @@
   --motion-hover: 120ms ease-out;
   --motion-panel: 180ms ease-out;
   --motion-max: 240ms ease-out;
+  /* SPEC-DEVIATION (§2.5): continuous progress/spinner cycles are deliberately slower than the
+   * 240ms interaction cap to avoid flicker. They carry no state transition and are fully removed
+   * by the reduced-motion guard below. */
+  --motion-loop: 1.2s;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -90,6 +103,18 @@
     --motion-hover: 0ms;
     --motion-panel: 0ms;
     --motion-max: 0ms;
+  }
+
+  /* Framework transitions can carry inline durations, and a few loading indicators have their
+   * own timing. This final guard makes the reduced-motion contract global without requiring each
+   * future component to remember a second media query. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

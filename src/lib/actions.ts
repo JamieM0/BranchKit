@@ -632,6 +632,16 @@ export async function deleteTag(repoId: string, name: string): Promise<void> {
 	}
 }
 
+export async function deleteLocalTag(repoId: string, name: string): Promise<void> {
+	try {
+		await ipc.deleteLocalTag(repoId, name);
+		toasts.push({ message: `Deleted local tag \`${name}\``, tone: "warn", icon: "trash" });
+	} catch (e) {
+		const { userMessage, raw } = asAppError(e);
+		toasts.pushError(userMessage, raw);
+	}
+}
+
 /** Builds a web URL for `sha` on a known host (github.com/gitlab.com), or `null` for anything else
  * — "Copy link to this commit on remote" (GITKRAKEN_WORKFLOWS.md §2.9/§3.1). */
 export function commitWebUrl(remoteUrl: string, sha: string): string | null {

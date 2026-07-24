@@ -37,6 +37,15 @@ pub struct GeneratedCommitMessage {
     pub description: String,
 }
 
+/// The complete, Markdown-formatted explanation returned for an existing commit. Unlike commit
+/// messages, explanations deliberately do not have a style setting: they are connected prose,
+/// never Conventional Commits shorthand.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedCommitExplanation {
+    pub markdown: String,
+}
+
 /// Splits a multi-file unified diff into one string per file, each starting at its
 /// `diff --git a/… b/…` header — the unit the per-file 150-line cap (ARCHITECTURE.md §10) applies to.
 fn split_into_files(diff: &str) -> Vec<String> {
@@ -126,6 +135,24 @@ pub fn build_commit_prompt(
     let user = format!("{}\n\n{}", stat.trim_end(), truncated);
 
     vec![ChatMessage::system(system), ChatMessage::user(user)]
+}
+
+/// Builds the one request used to explain an existing commit. `commit_show` is intentionally not
+/// truncated: an explanation that omits part of a commit is worse than no explanation at all.
+/// This also intentionally ignores `AiSettings::style` and `max_diff_size_kb`; those settings
+/// are exclusively for authoring new commit messages.
+pub fn build_commit_explanation_prompt(commit_show: &str) -> Vec<ChatMessage> {
+    vec![
+        ChatMessage::system(
+            "Explain this entire git commit for a developer. Cover every changed file and every \
+             meaningful behavioral, data-flow, API, test, configuration, and migration implication. \
+             Use compact connected prose, grouped with useful Markdown headings only when they \
+             improve scanning. Be terse but complete; do not use Conventional Commits syntax, \
+             shortform, or a file-by-file diff recital. Mention uncertainty only when the patch \
+             cannot establish intent. Output Markdown only.",
+        ),
+        ChatMessage::user(format!("Full commit (metadata and complete patch):\n\n{commit_show}")),
+    ]
 }
 
 /// Strips a single Markdown code fence wrapping the *entire* reply (```` ``` ```` or ```` ```text ````
@@ -293,5 +320,14 @@ mod tests {
         let msg = parse_commit_message("\n\n  Fix the thing  \n\nbody line\n\n");
         assert_eq!(msg.summary, "Fix the thing");
         assert_eq!(msg.description, "body line");
+    }
+
+    #[test]
+    fn explanation_prompt_uses_the_full_commit_and_ignores_commit_message_style() {
+        let complete_patch = "commit abc\n\ndiff --git a/a b/a\n+all changes";
+        let messages = build_commit_explanation_prompt(complete_patch);
+        assert!(messages[1].content.contains(complete_patch));
+        assert!(messages[0].content.contains("entire git commit"));
+        assert!(messages[0].content.contains("do not use Conventional Commits"));
     }
 }

@@ -25,7 +25,10 @@ use crate::git::ops::require_repo;
 use crate::settings::{self, AiProviderKind};
 use crate::state::AppState;
 
-use prompt::{build_commit_prompt, parse_commit_message, GeneratedCommitMessage};
+use prompt::{
+    build_commit_explanation_prompt, build_commit_prompt, parse_commit_message,
+    GeneratedCommitExplanation, GeneratedCommitMessage,
+};
 
 /// A running local sidecar — ARCHITECTURE.md §10. Killed on idle timeout (`local::run_idle_monitor`),
 /// on `remove_local_model`, and on app exit (`lib.rs`'s `RunEvent::Exit`).
@@ -95,4 +98,55 @@ pub async fn generate_commit_message(
     };
 
     Ok(parse_commit_message(&full_text))
+}
+
+/// Explains one complete historical commit with exactly one provider request. The full `git show`
+/// output is deliberately passed through untouched so AI never silently explains only a truncated
+/// portion of the commit.
+#[tauri::command]
+pub async fn explain_commit(
+    app: AppHandle,
+    ai_state: State<'_, AiState>,
+    repo_state: State<'_, AppState>,
+    repo_id: String,
+    sha: String,
+) -> Result<GeneratedCommitExplanation, AppError> {
+    let handle = require_repo(&repo_state, &repo_id)?;
+    let app_settings = settings::get_settings(app.clone())?;
+    if !app_settings.ai.enabled {
+        return Err(AppError::new(
+            "AI isn't enabled",
+            "AiSettings::enabled is false",
+        ));
+    }
+
+    let show = git(
+        &handle.path,
+        &[
+            "show",
+            "--no-color",
+            "--format=fuller",
+            "--binary",
+            "--find-renames",
+            "--find-copies",
+            "--no-ext-diff",
+            &sha,
+        ],
+        GitOpts::default(),
+    )
+    .await?;
+    let commit_show = String::from_utf8_lossy(&show.stdout).into_owned();
+    let messages = build_commit_explanation_prompt(&commit_show);
+
+    let token_app = app.clone();
+    let on_token = move |token: &str| {
+        let _ = token_app.emit("ai://explanation/token", token);
+    };
+    let markdown = match app_settings.ai.provider.clone() {
+        AiProviderKind::Local => local::generate(&app, &ai_state, &messages, on_token).await?,
+        AiProviderKind::Ollama => ollama::generate(&app_settings.ai, &messages, on_token).await?,
+        AiProviderKind::Remote => remote::generate(&app_settings.ai, &messages, on_token).await?,
+    };
+
+    Ok(GeneratedCommitExplanation { markdown })
 }

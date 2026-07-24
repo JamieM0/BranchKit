@@ -545,9 +545,45 @@ pub async fn create_tag(
     Ok(())
 }
 
-/// Delete a tag — the left panel's TAGS section / graph tag pill's Delete.
+/// Returns whether `origin` is configured. Repositories without a remote still support the
+/// local-only form of tag deletion.
+async fn has_origin(repo: &Path) -> Result<bool, GitError> {
+    let output = git(repo, &["remote"], GitOpts::default()).await?;
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(|remote| remote == "origin"))
+}
+
+/// Delete a tag from `origin` (when configured) and locally. The remote is updated first so a
+/// failed push leaves the local tag intact rather than silently creating a local/remote mismatch.
 #[tauri::command]
 pub async fn delete_tag(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+    name: String,
+) -> Result<(), AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    handle.begin_self_op(&[WatchedKind::Refs]);
+
+    if has_origin(&handle.path).await? {
+        let remote_ref = format!("refs/tags/{name}");
+        git(
+            &handle.path,
+            &["push", "--progress", "origin", "--delete", &remote_ref],
+            GitOpts::network(),
+        )
+        .await?;
+    }
+    git(&handle.path, &["tag", "-d", &name], GitOpts::default()).await?;
+    emit_changes(&app, &repo_id, &[ChangeKind::Refs]);
+    Ok(())
+}
+
+/// Delete only the local tag, leaving any tag published to `origin` untouched.
+#[tauri::command]
+pub async fn delete_local_tag(
     app: AppHandle,
     state: State<'_, AppState>,
     repo_id: String,

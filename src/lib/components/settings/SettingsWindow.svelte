@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { settingsWindow, type SettingsSection } from "$lib/stores/settingsWindow.svelte";
+	import { focusOnMount } from "$lib/focus";
 	import { appSettings } from "$lib/stores/appSettings.svelte";
 	import { settings } from "$lib/stores/settings.svelte";
 	import { theme } from "$lib/stores/theme.svelte";
@@ -160,7 +161,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 	<div class="scrim" onclick={() => settingsWindow.dismiss()} onkeydown={handleKeydown} role="presentation">
 		<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-		<div class="window" role="dialog" aria-modal="true" aria-label="Settings" onclick={(e) => e.stopPropagation()}>
+		<div class="window" role="dialog" aria-modal="true" aria-label="Settings" tabindex="-1" onclick={(e) => e.stopPropagation()} use:focusOnMount>
 			<nav class="nav">
 				{#each SECTIONS as s (s.id)}
 					<button
@@ -991,7 +992,7 @@
 	.progress-fill {
 		height: 100%;
 		background: var(--accent);
-		transition: width 180ms ease-out;
+		transition: width var(--motion-panel);
 	}
 
 	.progress-stats {

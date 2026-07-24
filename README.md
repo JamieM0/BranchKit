@@ -21,7 +21,7 @@ Free · open source · cross-platform — with no accounts, telemetry, or upsell
 
 <div align="center">
 
-![The Keep Panel showing two candidate blocks labelled by branch](docs/keep-panel.png)
+![The Keep Panel showing two candidate blocks labelled by branch](docs/screenshots/keep-panel.jpg)
 
 
 <em>Resolving a merge conflict by choosing what to keep — no diff markers, no hand-editing.</em>
@@ -42,12 +42,6 @@ It's built for people who want to focus on building and get git out of the way, 
 Conflict resolution is the most common "complex" part of git, so it's the part
 BranchKit works hardest to simplify. The **Keep Panel** replaces the usual "theirs" and "ours" with a single, readable view of the file you're building.
 
-<div align="center">
-
-![Resolving a merge conflict in the Keep Panel](docs/keep-panel-demo.gif)
-
-</div>
-
 Each side of a conflict is a labelled block with its real branch name — *yours* and
 *incoming*. You **keep** a side with one click, or keep both and they stack in the order you click them. Lines renumber live as
 you go, you can keep individual lines, and there's a hand-edit escape hatch when you
@@ -56,14 +50,14 @@ cherry-pick, revert, and stash conflicts, so there's one thing to learn instead 
 
 ## The graph is the workbench
 
-The commit graph is how you *do* things. Drag onebranch onto another to merge, rebase, or fast-forward. Double-click a remote branch to
+The commit graph is how you *do* things. Drag one branch onto another to merge, rebase, or fast-forward. Double-click a remote branch to
 create a tracking branch and check it out in a single gesture. Stashes live right in the
 graph, unpushed commits wear a dashed halo so you can see what's local at a glance, and
 the top row doubles as your commit message editor.
 
 <div align="center">
 
-![BranchKit's commit graph with branches, tags, stashes and worktrees](docs/commit-graph.png)
+![BranchKit's commit graph with branches, tags, stashes and worktrees](docs/screenshots/commit-graph.jpg)
 
 </div>
 
@@ -89,10 +83,22 @@ Basically, BranchKit's got your back every step of the way.
 
 ## Install
 
-Download the latest release for your OS from [Releases](../../releases): `.dmg` (macOS),
-`.msi` (Windows), `.AppImage` / `.deb` (Linux). Requires git ≥ 2.30 on your PATH. On
-Linux, secure credential storage uses libsecret/gnome-keyring; without it, secrets are
-kept in memory for the session only.
+Download the latest release from [Releases](../../releases). BranchKit requires git ≥ 2.30
+on your `PATH`.
+
+- **macOS:** download the build for your Mac (`aarch64` for Apple silicon, `x86_64` for
+  Intel), open the `.dmg`, and drag BranchKit to Applications. Release signing and
+  notarisation are not yet configured for the release candidate, so macOS may require
+  **Open Anyway** in Privacy & Security.
+- **Windows:** download and run the `.msi` installer. Windows 10 and 11 are supported.
+- **Linux:** use the portable `.AppImage` or install the `.deb` on Debian/Ubuntu. Secure
+  credential storage uses libsecret/gnome-keyring; when it is unavailable, BranchKit shows
+  a warning and keeps secrets in memory for that session only.
+
+## Screenshots
+
+The images above show the v0.1.0 Keep Panel and commit graph running against real repositories.
+More workflow captures are welcome with documentation contributions.
 
 ## Building from source
 
@@ -124,5 +130,7 @@ and lint commands above pass on your change.
 
 ## License
 
-[AGPL-3.0](LICENSE). BranchKit is an independent project, not affiliated with, endorsed by,
-or connected to any other git client, or developers of any other git client.
+[AGPL-3.0](LICENSE). If you distribute a modified version or offer it over a network, the
+AGPL requires you to make the corresponding source available under the same licence.
+
+BranchKit is an independent project and is not affiliated with GitKraken or its developers.
