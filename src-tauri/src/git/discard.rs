@@ -11,6 +11,7 @@
 //! identically and the purge/size-cap logic works the same either way.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,7 @@ use super::status::{status, FileStatusCode, StatusEntryKind};
 
 const PURGE_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const MAX_TRASH_BYTES: u64 = 200 * 1024 * 1024;
+static ENTRY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,7 +74,8 @@ fn new_entry_id() -> (String, u64) {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
-    (format!("{ms:020}"), ms)
+    let sequence = ENTRY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    (format!("{ms:020}-{sequence:016}"), ms)
 }
 
 fn dir_size(dir: &Path) -> u64 {
@@ -123,7 +126,7 @@ async fn write_trash(
     paths: &[String],
     description: &str,
     patch_override: Option<&str>,
-) -> Result<(), AppError> {
+) -> Result<DiscardedEntry, AppError> {
     let (id, ms) = new_entry_id();
     let entry_dir = root.join(&id);
     std::fs::create_dir_all(&entry_dir)?;
@@ -178,7 +181,12 @@ async fn write_trash(
         serde_json::to_string_pretty(&manifest)?,
     )?;
     enforce_cap(root);
-    Ok(())
+    Ok(DiscardedEntry {
+        id,
+        description: description.to_string(),
+        files: paths.to_vec(),
+        created_at_ms: ms,
+    })
 }
 
 /// Reverts `paths` in the working tree: tracked files restore to their index content, untracked
@@ -217,11 +225,11 @@ pub async fn discard_file(
     state: State<'_, AppState>,
     repo_id: String,
     path: String,
-) -> Result<(), AppError> {
+) -> Result<DiscardedEntry, AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
     let root = trash_root_for(&app, &handle.path)?;
-    write_trash(
+    let entry = write_trash(
         &root,
         &handle.path,
         std::slice::from_ref(&path),
@@ -232,7 +240,7 @@ pub async fn discard_file(
     handle.begin_self_op(&[WatchedKind::WorkingTree]);
     discard_paths(&handle.path, std::slice::from_ref(&path)).await?;
     emit_changes(&app, &repo_id, &[ChangeKind::WorkingTree]);
-    Ok(())
+    Ok(entry)
 }
 
 /// Discard a single hunk from a file's unstaged diff — the hunk header's "Discard hunk…"
@@ -246,7 +254,7 @@ pub async fn discard_hunk(
     repo_id: String,
     path: String,
     hunk_index: usize,
-) -> Result<(), AppError> {
+) -> Result<DiscardedEntry, AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
 
@@ -266,11 +274,14 @@ pub async fn discard_hunk(
     })?;
     let all = all_change_indices(hunk);
     let Some(patch) = build_line_patch(&raw_text, &file_diff, hunk_index, &all, false) else {
-        return Ok(());
+        return Err(AppError::new(
+            "That change no longer exists — the file may have been edited",
+            format!("hunk {hunk_index} produced no discard patch"),
+        ));
     };
 
     let root = trash_root_for(&app, &handle.path)?;
-    write_trash(
+    let entry = write_trash(
         &root,
         &handle.path,
         std::slice::from_ref(&path),
@@ -281,7 +292,7 @@ pub async fn discard_hunk(
     handle.begin_self_op(&[WatchedKind::WorkingTree]);
     apply_patch(&handle.path, &patch, true, false).await?;
     emit_changes(&app, &repo_id, &[ChangeKind::WorkingTree]);
-    Ok(())
+    Ok(entry)
 }
 
 /// Discard every unstaged *and* staged change in the working tree, including untracked files —
@@ -292,7 +303,7 @@ pub async fn discard_all(
     app: AppHandle,
     state: State<'_, AppState>,
     repo_id: String,
-) -> Result<(), AppError> {
+) -> Result<Option<DiscardedEntry>, AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
 
@@ -309,7 +320,7 @@ pub async fn discard_all(
         .map(|e| e.path.clone())
         .collect();
     if changed_paths.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
     let untracked_paths: Vec<String> = report
@@ -340,7 +351,7 @@ pub async fn discard_all(
     };
 
     let root = trash_root_for(&app, &handle.path)?;
-    write_trash(
+    let entry = write_trash(
         &root,
         &handle.path,
         &changed_paths,
@@ -350,12 +361,21 @@ pub async fn discard_all(
     .await?;
 
     handle.begin_self_op(&[WatchedKind::WorkingTree, WatchedKind::Index]);
-    git(&handle.path, &["reset", "--hard", "HEAD"], GitOpts::default()).await?;
+    git(
+        &handle.path,
+        &["reset", "--hard", "HEAD"],
+        GitOpts::default(),
+    )
+    .await?;
     for p in &untracked_paths {
         let _ = std::fs::remove_file(handle.path.join(p));
     }
-    emit_changes(&app, &repo_id, &[ChangeKind::WorkingTree, ChangeKind::Index]);
-    Ok(())
+    emit_changes(
+        &app,
+        &repo_id,
+        &[ChangeKind::WorkingTree, ChangeKind::Index],
+    );
+    Ok(Some(entry))
 }
 
 /// The repo menu's "Recently discarded" list (DESIGN_SPEC.md §7.4/§12), newest first.
@@ -519,6 +539,13 @@ mod tests {
     }
 
     #[test]
+    fn trash_entry_ids_are_unique_even_within_one_millisecond() {
+        let (first, _) = new_entry_id();
+        let (second, _) = new_entry_id();
+        assert_ne!(first, second);
+    }
+
+    #[test]
     fn dir_size_sums_nested_files() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), vec![0u8; 10]).unwrap();
@@ -555,18 +582,30 @@ mod tests {
     }
 
     async fn init_repo(dir: &Path) {
-        git(dir, &["init", "--initial-branch=main", "-q"], GitOpts::default())
-            .await
-            .unwrap();
+        git(
+            dir,
+            &["init", "--initial-branch=main", "-q"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
         git(dir, &["config", "user.name", "T"], GitOpts::default())
             .await
             .unwrap();
-        git(dir, &["config", "user.email", "t@example.com"], GitOpts::default())
-            .await
-            .unwrap();
-        git(dir, &["config", "commit.gpgsign", "false"], GitOpts::default())
-            .await
-            .unwrap();
+        git(
+            dir,
+            &["config", "user.email", "t@example.com"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
+        git(
+            dir,
+            &["config", "commit.gpgsign", "false"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
         // Pin `core.autocrlf=false` so `git restore`/`git reset --hard` round-trip the exact bytes
         // the test wrote (Windows defaults to `true`, which would re-emit LF as CRLF on checkout
         // and break the byte-identical assertions below).
@@ -732,9 +771,13 @@ mod tests {
         commit_all(repo.path(), "init").await;
 
         std::fs::write(repo.path().join("staged.txt"), "one CHANGED\n").unwrap();
-        git(repo.path(), &["add", "--", "staged.txt"], GitOpts::default())
-            .await
-            .unwrap();
+        git(
+            repo.path(),
+            &["add", "--", "staged.txt"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
         std::fs::write(repo.path().join("unstaged.txt"), "two CHANGED\n").unwrap();
         std::fs::write(repo.path().join("untracked.txt"), "three\n").unwrap();
 
@@ -762,13 +805,23 @@ mod tests {
         .await
         .unwrap();
 
-        git(repo.path(), &["reset", "--hard", "HEAD"], GitOpts::default())
-            .await
-            .unwrap();
+        git(
+            repo.path(),
+            &["reset", "--hard", "HEAD"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
         std::fs::remove_file(repo.path().join("untracked.txt")).unwrap();
 
-        assert_eq!(std::fs::read_to_string(repo.path().join("staged.txt")).unwrap(), "one\n");
-        assert_eq!(std::fs::read_to_string(repo.path().join("unstaged.txt")).unwrap(), "two\n");
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("staged.txt")).unwrap(),
+            "one\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("unstaged.txt")).unwrap(),
+            "two\n"
+        );
         assert!(!repo.path().join("untracked.txt").exists());
 
         let entries = list_entries(trash.path());
@@ -805,9 +858,15 @@ mod tests {
         commit_all(repo.path(), "init").await;
         std::fs::write(repo.path().join("f.txt"), "b\n").unwrap();
 
-        write_trash(&repo_trash_dir, repo.path(), &["f.txt".to_string()], "old", None)
-            .await
-            .unwrap();
+        write_trash(
+            &repo_trash_dir,
+            repo.path(),
+            &["f.txt".to_string()],
+            "old",
+            None,
+        )
+        .await
+        .unwrap();
         let entries = list_entries(&repo_trash_dir);
         let old_id = entries[0].id.clone();
 
@@ -819,15 +878,25 @@ mod tests {
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
         std::fs::write(repo.path().join("f.txt"), "c\n").unwrap();
-        write_trash(&repo_trash_dir, repo.path(), &["f.txt".to_string()], "new", None)
-            .await
-            .unwrap();
+        write_trash(
+            &repo_trash_dir,
+            repo.path(),
+            &["f.txt".to_string()],
+            "new",
+            None,
+        )
+        .await
+        .unwrap();
 
         // A cutoff below both entries' timestamps (the backdated one at 1000ms, the real one at
         // "now") purges neither.
         purge_trash_dir(trash_parent.path(), 500);
         let remaining = list_entries(&repo_trash_dir);
-        assert_eq!(remaining.len(), 2, "cutoff below both timestamps keeps both entries");
+        assert_eq!(
+            remaining.len(),
+            2,
+            "cutoff below both timestamps keeps both entries"
+        );
 
         // A cutoff just under "now" purges the backdated (1000ms) entry but keeps the real one.
         let now_ms = SystemTime::now()

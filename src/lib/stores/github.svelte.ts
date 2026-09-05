@@ -14,6 +14,7 @@ class GithubStore {
 	deviceCode: DeviceCode | null = $state(null);
 	polling = $state(false);
 	signInError: string | null = $state(null);
+	#signInAttempt = 0;
 
 	connected = $derived(this.user !== null);
 
@@ -27,6 +28,7 @@ class GithubStore {
 	}
 
 	async beginSignIn() {
+		const attempt = ++this.#signInAttempt;
 		this.signInError = null;
 		this.deviceCode = null;
 		try {
@@ -42,16 +44,20 @@ class GithubStore {
 				this.deviceCode.interval,
 				this.deviceCode.expiresIn,
 			);
+			if (attempt !== this.#signInAttempt) return;
 			this.user = user;
 			this.deviceCode = null;
 		} catch (e) {
+			if (attempt !== this.#signInAttempt) return;
 			this.signInError = e instanceof Error ? e.message : String(e);
 		} finally {
-			this.polling = false;
+			if (attempt === this.#signInAttempt) this.polling = false;
 		}
 	}
 
 	cancelSignIn() {
+		this.#signInAttempt += 1;
+		void ipc.cancelDeviceFlow();
 		this.deviceCode = null;
 		this.polling = false;
 		this.signInError = null;

@@ -163,6 +163,9 @@ pub async fn open_repo(
     // ARCHITECTURE.md §7.2: one auto-fetch interval per open repo, gated on window focus — the
     // `AppState` it reads is `Arc`-shared so `focused` updates from `lib.rs`'s window-event
     // handler are visible without threading a fresh reference through on every tick.
+    // Opening a repo starts the interval clock; it must not cause an immediate fetch before the
+    // configured number of minutes has elapsed.
+    handle.record_fetch();
     let focused = state.focused_handle();
     let auto_fetch = crate::git::remote::spawn_auto_fetch(app.clone(), handle.clone(), focused);
     *handle
@@ -211,20 +214,15 @@ pub async fn clone_repo(
     let helper = crate::credentials::helper_config_args();
     let mut clone_args: Vec<&str> = helper.iter().map(String::as_str).collect();
     clone_args.extend(["clone", "--progress", &url, &dest_str]);
-    let clone_result = git_with_progress(
-        &parent,
-        &clone_args,
-        GitOpts::network(),
-        move |update| {
-            let _ = app_for_progress.emit(
-                &event_name,
-                ChangeKind::OperationProgress {
-                    phase: update.phase,
-                    percent: Some(update.percent),
-                },
-            );
-        },
-    )
+    let clone_result = git_with_progress(&parent, &clone_args, GitOpts::network(), move |update| {
+        let _ = app_for_progress.emit(
+            &event_name,
+            ChangeKind::OperationProgress {
+                phase: update.phase,
+                percent: Some(update.percent),
+            },
+        );
+    })
     .await;
 
     if let Err(e) = clone_result {

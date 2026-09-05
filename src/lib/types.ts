@@ -380,6 +380,11 @@ export interface AppSettings {
   ai: AiSettings;
 }
 
+export interface PoppedStash {
+  sha: string;
+  subject: string;
+}
+
 // --- ai/ ---------------------------------------------------------
 
 export type LocalModelState = "notDownloaded" | "ready";

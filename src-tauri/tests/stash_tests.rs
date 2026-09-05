@@ -1,5 +1,6 @@
 mod common;
 
+use branchkit_lib::git::stash::restore_popped_stash_exact;
 use common::TestRepo;
 
 /// Stash push (with message + untracked) then pop restores the working tree exactly —
@@ -74,7 +75,34 @@ async fn stash_commit_diffs_against_its_base_like_an_ordinary_commit() {
     let stashes = stash_list(repo.path()).await.expect("stash list");
     assert_eq!(stashes.len(), 1);
 
-    let files = commit_files(repo.path(), &stashes[0].sha).await.expect("commit files");
+    let files = commit_files(repo.path(), &stashes[0].sha)
+        .await
+        .expect("commit files");
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].path, "a.txt");
+}
+
+#[tokio::test]
+async fn restoring_a_popped_stash_reuses_its_exact_object_and_preserves_later_edits() {
+    let repo = TestRepo::init().await;
+    repo.write("a.txt", "one\n");
+    repo.commit_all("base").await;
+    repo.write("a.txt", "two\n");
+    repo.run(&["stash", "push", "-m", "original label"]).await;
+
+    let stash = repo.run(&["rev-parse", "stash@{0}"]).await;
+    let sha = String::from_utf8_lossy(&stash.stdout).trim().to_string();
+    repo.run(&["stash", "pop"]).await;
+    repo.write("later.txt", "do not capture this\n");
+
+    restore_popped_stash_exact(repo.path(), &sha, "original label")
+        .await
+        .expect("restore exact stash");
+
+    let restored = repo.run(&["rev-parse", "stash@{0}"]).await;
+    assert_eq!(String::from_utf8_lossy(&restored.stdout).trim(), sha);
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("later.txt")).unwrap(),
+        "do not capture this\n"
+    );
 }

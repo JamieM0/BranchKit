@@ -1,5 +1,5 @@
 //! Per-repo actor registry — ARCHITECTURE.md §2. Each open repo gets a `RepoHandle` in a
-//! `DashMap` in tauri `State`. All mutating git commands (added in later prompts) must take
+//! `DashMap` in tauri `State`. All mutating git commands must take
 //! `op_queue` before running; reads may run concurrently. `generation` + `suppress` implement
 //! the watcher self-echo suppression described in §4.
 
@@ -108,6 +108,9 @@ pub struct AppState {
     /// `true` so a repo opened before the first focus event still auto-fetches. `Arc`-wrapped so
     /// each repo's auto-fetch task can hold its own cheap, independent handle to it.
     pub focused: Arc<AtomicBool>,
+    /// Cancellation flag for the currently running GitHub device-flow poll. Starting a new flow
+    /// cancels the previous one; the Settings Cancel button flips the same flag.
+    pub github_device_flow_cancel: Mutex<Option<Arc<AtomicBool>>>,
 }
 
 impl Default for AppState {
@@ -116,6 +119,7 @@ impl Default for AppState {
             repos: DashMap::new(),
             next_id: AtomicU64::new(0),
             focused: Arc::new(AtomicBool::new(true)),
+            github_device_flow_cancel: Mutex::new(None),
         }
     }
 }

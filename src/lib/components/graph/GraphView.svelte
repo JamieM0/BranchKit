@@ -14,7 +14,7 @@
 		graphWidthForLanes,
 		laneCenterX,
 		MERGE_NODE_RADIUS,
-		ROW_HEIGHT,
+		rowHeightForDensity,
 		STASH_NODE_RADIUS,
 		totalHeight,
 		visibleRowRange,
@@ -45,7 +45,7 @@
 	/** The commit graph — DESIGN_SPEC.md §4, ARCHITECTURE.md §5.4. Hand-rolled virtualized DOM rows
 	 * over a single background canvas that draws edges/nodes/avatars for the visible range only,
 	 * redrawn via rAF on scroll. Git mutations (checkout, create branch, back-to-branch, open diff)
-	 * are emitted as intents; they get wired to the op queue in later prompts. */
+	 * are routed through the shared action layer and backend operation queue. */
 	let {
 		onSelectCommit,
 		onCompare,
@@ -105,6 +105,7 @@
 	const rows = $derived(graph.rows);
 	const headSha = $derived(graph.head?.sha ?? null);
 	const detached = $derived(graph.head?.detached ?? false);
+	const rowHeight = $derived(rowHeightForDensity(appSettings.current.appearance.graphDensity));
 
 	// Local-vs-remote commit distinction (§15/QA): commits unreachable from every remote-tracking
 	// ref are "unpushed" — they only exist on this machine. Computed by a plain BFS over the
@@ -172,7 +173,7 @@
 	const allRows = $derived<(WipRow | GraphViewRow)[]>(wipRow ? [wipRow, ...rows] : rows);
 	const wipOffset = $derived(wipRow ? 1 : 0);
 
-	const range = $derived(visibleRowRange(scrollTop, viewportHeight, allRows.length));
+	const range = $derived(visibleRowRange(scrollTop, viewportHeight, allRows.length, undefined, rowHeight));
 	const visibleRows = $derived(allRows.slice(range.start, range.end));
 
 	// Slide-in only on genuine appearance (working tree goes dirty), never on scroll (§4.2).
@@ -393,7 +394,7 @@
 		ctx.clearRect(0, 0, cssW, cssH);
 
 		const st = scrollEl ? scrollEl.scrollTop : scrollTop;
-		const win = visibleRowRange(st, cssH, allRows.length);
+		const win = visibleRowRange(st, cssH, allRows.length, undefined, rowHeight);
 		const c = colors();
 		const graphLeft = graphView.widths.branch;
 
@@ -422,14 +423,14 @@
 				const clippedEnd = Math.min(end, win.end - 1);
 				const x = graphLeft + laneCenterX(lane);
 				const path = passPaths[laneColorIndex(lane)];
-				path.moveTo(x, clippedStart * ROW_HEIGHT - st);
-				path.lineTo(x, (clippedEnd + 1) * ROW_HEIGHT - st);
+				path.moveTo(x, clippedStart * rowHeight - st);
+				path.lineTo(x, (clippedEnd + 1) * rowHeight - st);
 				if (litPassPaths) {
 					const litPath = litPassPaths[laneColorIndex(lane)];
 					for (let row = clippedStart; row <= clippedEnd; row += 1) {
 						if (!lit?.has(`${row}:${lane}`)) continue;
-						litPath.moveTo(x, row * ROW_HEIGHT - st);
-						litPath.lineTo(x, (row + 1) * ROW_HEIGHT - st);
+						litPath.moveTo(x, row * rowHeight - st);
+						litPath.lineTo(x, (row + 1) * rowHeight - st);
 					}
 				}
 			}
@@ -450,9 +451,9 @@
 		// Pass 2: branch, merge and node transitions. Drawn before nodes so avatars sit on top.
 		for (let i = win.start; i < win.end; i += 1) {
 			const row = allRows[i];
-			const yTop = i * ROW_HEIGHT - st;
-			const yMid = yTop + ROW_HEIGHT / 2;
-			const yBot = yTop + ROW_HEIGHT;
+			const yTop = i * rowHeight - st;
+			const yMid = yTop + rowHeight / 2;
+			const yBot = yTop + rowHeight;
 			for (const seg of row.segments) {
 				const p1 = endpoint(seg.from, graphLeft, yTop, yMid, yBot, row.node.lane);
 				const p2 = endpoint(seg.to, graphLeft, yTop, yMid, yBot, row.node.lane);
@@ -478,7 +479,7 @@
 		// Pass 3: nodes + avatars.
 		for (let i = win.start; i < win.end; i += 1) {
 			const row = allRows[i];
-			const yMid = i * ROW_HEIGHT - st + ROW_HEIGHT / 2;
+			const yMid = i * rowHeight - st + rowHeight / 2;
 			drawNode(ctx, row, graphLeft + laneCenterX(row.node.lane), yMid, c);
 		}
 
@@ -501,16 +502,16 @@
 		if (!scrollEl) return;
 		const st = scrollEl.scrollTop;
 		scrollTop = st;
-		const topIndex = Math.floor(st / ROW_HEIGHT);
+		const topIndex = Math.floor(st / rowHeight);
 		const row = allRows[topIndex];
-		anchor = { sha: row?.sha ?? null, offset: st - topIndex * ROW_HEIGHT };
+		anchor = { sha: row?.sha ?? null, offset: st - topIndex * rowHeight };
 		requestDraw();
 	}
 
 	function scrollRowIntoView(idx: number) {
 		if (!scrollEl) return;
-		const top = idx * ROW_HEIGHT;
-		const bottom = top + ROW_HEIGHT;
+		const top = idx * rowHeight;
+		const bottom = top + rowHeight;
 		if (top < scrollEl.scrollTop) {
 			scrollEl.scrollTop = top;
 		} else if (bottom > scrollEl.scrollTop + viewportHeight) {
@@ -580,7 +581,7 @@
 		if (row?.kind === "wip") return;
 		if (row?.kind === "stash") {
 			// Double-click a stash row → Pop with Undo toast (DESIGN_SPEC.md §4.5/§15.18).
-			if (repoId) void actions.popStash(repoId, row.selector, row.subject);
+			if (repoId) void actions.popStash(repoId, row.selector);
 			return;
 		}
 		// Double-click a commit → detached checkout, guarded (§4.6). "Don't ask again" skips the popover.
@@ -694,6 +695,7 @@
 		void hoveredSha;
 		void scrollTop;
 		void theme.resolved;
+		void rowHeight;
 		requestDraw();
 	});
 
@@ -741,7 +743,7 @@
 			if (previous !== -1 && anchor.sha && scrollEl) {
 				const idx = map.get(anchor.sha);
 				if (idx !== undefined) {
-					const top = anchoredScrollTop(idx, anchor.offset);
+					const top = anchoredScrollTop(idx, anchor.offset, rowHeight);
 					scrollEl.scrollTop = top;
 					scrollTop = top;
 				}
@@ -808,7 +810,7 @@
 		{#if showSkeleton}
 			<div class="skeleton" aria-hidden="true">
 				{#each Array(24) as _, i (i)}
-					<div class="skeleton-row" style="height: {ROW_HEIGHT}px;">
+					<div class="skeleton-row" style="height: {rowHeight}px;">
 						<span class="shimmer node"></span>
 						<span class="shimmer bar" style="width: {40 + ((i * 37) % 45)}%;"></span>
 					</div>
@@ -829,8 +831,8 @@
 				onscroll={onScroll}
 				onkeydown={onKeydown}
 			>
-				<div class="graph-spacer" style="height: {totalHeight(allRows.length)}px;">
-					<div class="graph-rows" style="transform: translateY({range.start * ROW_HEIGHT}px);">
+				<div class="graph-spacer" style="height: {totalHeight(allRows.length, rowHeight)}px;">
+					<div class="graph-rows" style="transform: translateY({range.start * rowHeight}px);">
 						{#each visibleRows as row (row.sha)}
 							{#if row.kind === "wip"}
 								<WipGraphRow {row} {repoId} animateIn={wipEnter} onSelect={handleWipSelect} />

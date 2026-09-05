@@ -32,13 +32,16 @@ fn with_credential_helper<'a>(helper: &'a [String], rest: &[&'a str]) -> Vec<&'a
     args
 }
 
-/// How often the auto-fetch interval ticks to check whether a fetch is due — not the fetch
-/// interval itself (that's `AUTO_FETCH_INTERVAL`), just how often we check the gates.
+/// How often the auto-fetch interval ticks to check whether the configured delay is due.
 const AUTO_FETCH_TICK: Duration = Duration::from_secs(15);
-/// Default auto-fetch interval — ARCHITECTURE.md §7.2 "setting; default 1min". Comfortably wider
-/// than the "ran <30s ago" manual-fetch guard, so one `fetched_within` check against this covers
-/// both "due for its regular interval" and "a manual fetch just happened".
-const AUTO_FETCH_INTERVAL: Duration = Duration::from_secs(60);
+fn fetch_args(prune: bool) -> Vec<&'static str> {
+    let mut args = vec!["fetch", "--all"];
+    if prune {
+        args.push("--prune");
+    }
+    args.push("--progress");
+    args
+}
 
 fn progress_emitter(app: AppHandle, repo_id: String) -> impl FnMut(super::exec::ProgressUpdate) {
     move |update| {
@@ -63,10 +66,12 @@ pub async fn fetch_all(
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
     handle.begin_self_op(&[WatchedKind::Refs, WatchedKind::Remote]);
+    let prune = settings::get_settings(app.clone())?.git.prune_on_fetch;
+    let fetch_args = fetch_args(prune);
     let helper = credentials::helper_config_args();
     let result = git_with_progress(
         &handle.path,
-        &with_credential_helper(&helper, &["fetch", "--all", "--prune", "--progress"]),
+        &with_credential_helper(&helper, &fetch_args),
         GitOpts::network(),
         progress_emitter(app.clone(), repo_id.clone()),
     )
@@ -191,8 +196,8 @@ pub async fn publish(
 }
 
 /// Starts the auto-fetch interval for a just-opened repo — ARCHITECTURE.md §7.2. Ticks every
-/// [`AUTO_FETCH_TICK`]; on each tick, fetches only if the window is focused, at least
-/// [`AUTO_FETCH_INTERVAL`] has passed since the last fetch, and the op queue isn't currently held
+/// [`AUTO_FETCH_TICK`]; on each tick, fetches only if the window is focused, the configured
+/// interval has passed since the last fetch, and the op queue isn't currently held
 /// (a `try_lock` — auto-fetch never waits behind a foreground op, it just skips this tick).
 /// Cancelled by dropping/aborting the returned handle, which `close_repo` does via
 /// `RepoHandle::auto_fetch_task`.
@@ -209,9 +214,17 @@ pub fn spawn_auto_fetch(
             if !focused.load(Ordering::SeqCst) {
                 continue;
             }
+            let Ok(current_settings) = settings::get_settings(app.clone()) else {
+                continue;
+            };
+            let interval_minutes = current_settings.general.auto_fetch_interval_minutes;
+            if interval_minutes == 0 {
+                continue;
+            }
+            let fetch_interval = Duration::from_secs(u64::from(interval_minutes) * 60);
             // §7.2: skip if a fetch (auto or manual) already ran within the interval — this one
             // check covers both "due for its regular interval" and "a manual fetch just happened".
-            if handle.fetched_within(AUTO_FETCH_INTERVAL) {
+            if handle.fetched_within(fetch_interval) {
                 continue;
             }
             let Ok(_guard) = handle.op_queue.try_lock() else {
@@ -219,10 +232,11 @@ pub fn spawn_auto_fetch(
                 continue;
             };
             handle.begin_self_op(&[WatchedKind::Refs, WatchedKind::Remote]);
+            let fetch_args = fetch_args(current_settings.git.prune_on_fetch);
             let helper = credentials::helper_config_args();
             let result = git_with_progress(
                 &handle.path,
-                &with_credential_helper(&helper, &["fetch", "--all", "--prune", "--progress"]),
+                &with_credential_helper(&helper, &fetch_args),
                 GitOpts::network(),
                 progress_emitter(app.clone(), repo_id.clone()),
             )
@@ -236,4 +250,18 @@ pub fn spawn_auto_fetch(
             // that, not a background timer.
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fetch_arguments_honor_prune_setting() {
+        assert_eq!(
+            fetch_args(true),
+            vec!["fetch", "--all", "--prune", "--progress"]
+        );
+        assert_eq!(fetch_args(false), vec!["fetch", "--all", "--progress"]);
+    }
 }

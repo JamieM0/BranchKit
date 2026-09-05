@@ -125,7 +125,7 @@
 	 * in the graph (which is ordered by commit topology, not stash recency). */
 	function popLatest() {
 		if (!hasStashes) return;
-		void actions.popStash(repoId, "stash@{0}", "");
+		void actions.popStash(repoId, "stash@{0}");
 	}
 
 	function openPushMenu() {

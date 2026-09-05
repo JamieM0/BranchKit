@@ -75,18 +75,20 @@ pub enum GraphTopologyRow {
 /// surfaced separately as Stash pseudo-rows (§5.1/DESIGN_SPEC §4.5), so leaving them in here would
 /// render the stash commit twice — once as a commit, once as a stash — a duplicate graph row.
 pub async fn topology(repo: &Path) -> Result<Vec<CommitTopology>, GitError> {
-    let output = git(
-        repo,
-        &[
-            "rev-list",
-            "--exclude=refs/stash",
-            "--all",
-            "--topo-order",
-            "--parents",
-        ],
-        GitOpts::default(),
-    )
-    .await?;
+    topology_excluding(repo, &[]).await
+}
+
+pub async fn topology_excluding(
+    repo: &Path,
+    excluded_refs: &[String],
+) -> Result<Vec<CommitTopology>, GitError> {
+    let exclusions: Vec<String> = std::iter::once("--exclude=refs/stash".to_string())
+        .chain(excluded_refs.iter().map(|name| format!("--exclude={name}")))
+        .collect();
+    let mut args: Vec<&str> = vec!["rev-list"];
+    args.extend(exclusions.iter().map(String::as_str));
+    args.extend(["--all", "--topo-order", "--parents"]);
+    let output = git(repo, &args, GitOpts::default()).await?;
 
     let text = String::from_utf8_lossy(&output.stdout);
     let mut result = Vec::new();
@@ -105,8 +107,11 @@ pub async fn topology(repo: &Path) -> Result<Vec<CommitTopology>, GitError> {
     Ok(result)
 }
 
-pub async fn graph_rows(repo: &Path) -> Result<Vec<GraphTopologyRow>, GitError> {
-    let commits = topology(repo).await?;
+pub async fn graph_rows(
+    repo: &Path,
+    excluded_refs: &[String],
+) -> Result<Vec<GraphTopologyRow>, GitError> {
+    let commits = topology_excluding(repo, excluded_refs).await?;
     let stashes = stash_list(repo).await?;
 
     let mut stashes_by_base: HashMap<String, Vec<StashEntry>> = HashMap::new();
@@ -248,6 +253,7 @@ pub async fn stash_list(repo: &Path) -> Result<Vec<StashEntry>, GitError> {
 pub async fn get_graph(
     state: State<'_, AppState>,
     repo_id: String,
+    excluded_refs: Vec<String>,
 ) -> Result<String, AppError> {
     let handle = state.get_repo(&repo_id).ok_or_else(|| {
         AppError::new(
@@ -260,7 +266,7 @@ pub async fn get_graph(
     // as one compact line protocol instead; ipc.ts restores the same typed rows. `C` fields cannot
     // contain whitespace (they are object ids). Only stash subjects are free text, so JSON-quote
     // that final field while keeping the overwhelmingly common commit row allocation-free.
-    let rows = graph_rows(&handle.path).await?;
+    let rows = graph_rows(&handle.path, &excluded_refs).await?;
     let mut payload = String::with_capacity(rows.len() * 86);
     for row in rows {
         match row {

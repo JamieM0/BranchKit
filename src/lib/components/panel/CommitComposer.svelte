@@ -24,6 +24,7 @@
 
 	const entries = $derived(status.report.entries);
 	const stagedCount = $derived(stagedRows(entries).length);
+	const unstagedCount = $derived(unstagedRows(entries).length);
 	const totalChanged = $derived(
 		new Set([
 			...unstagedRows(entries).map((r) => r.path),
@@ -31,7 +32,9 @@
 		]).size,
 	);
 	const hasStaged = $derived(stagedCount > 0);
+	const hasUnstaged = $derived(unstagedCount > 0);
 	const hasWip = $derived(totalChanged > 0);
+	const guideLength = $derived(appSettings.current.git.commitSummaryGuideLength);
 
 	// Amend-of-a-pushed-commit warning (§15.15): HEAD is on the remote when the branch tracks an
 	// upstream and isn't ahead of it (its tip commit already exists on origin).
@@ -239,8 +242,8 @@
 			class="counter"
 			class:warn={commitDraft.counter === "warn"}
 			class:danger={commitDraft.counter === "danger"}
-			aria-label="{commitDraft.remaining} characters to the {72}-char guide"
-			title="Characters remaining before the 72-char summary guide"
+			aria-label="{commitDraft.remaining} characters to the {guideLength}-char guide"
+			title="Characters remaining before the {guideLength}-char summary guide"
 		>
 			{commitDraft.remaining}
 		</span>
@@ -280,7 +283,7 @@
 			disabled={generating}
 			onkeydown={onDescriptionKeydown}
 		></textarea>
-		<div class="ruler" aria-hidden="true"></div>
+		<div class="ruler" aria-hidden="true" style={`--guide-column: ${guideLength}ch`}></div>
 	</div>
 
 	<label class="amend">
@@ -303,24 +306,15 @@
 		>
 			Amend commit
 		</button>
-	{:else if hasStaged}
-		<button
-			type="button"
-			class="primary"
-			disabled={!commitDraft.canCommit}
-			onclick={() => void runCommit({ stageAllFirst: false })}
-		>
-			Commit {stagedCount} file{stagedCount === 1 ? "" : "s"} to <code>{branch}</code>
-		</button>
-	{:else if hasWip}
+	{:else if hasStaged && hasUnstaged}
 		<div class="split">
 			<button
 				type="button"
 				class="primary split-main"
 				disabled={!commitDraft.canCommit}
-				onclick={() => void runCommit({ stageAllFirst: true })}
+				onclick={() => void runCommit({ stageAllFirst: false })}
 			>
-				Stage all &amp; commit
+				Commit {stagedCount} staged file{stagedCount === 1 ? "" : "s"}
 			</button>
 			<button
 				type="button"
@@ -336,15 +330,32 @@
 					<button
 						type="button"
 						role="menuitem"
-						disabled={!hasStaged || !commitDraft.canCommit}
-						title={hasStaged ? "" : "Nothing staged yet"}
-						onclick={() => void runCommit({ stageAllFirst: false })}
+						disabled={!commitDraft.canCommit}
+						onclick={() => void runCommit({ stageAllFirst: true })}
 					>
-						Commit staged only
+						Stage all &amp; commit {totalChanged} files
 					</button>
 				</div>
 			{/if}
 		</div>
+	{:else if hasStaged}
+		<button
+			type="button"
+			class="primary"
+			disabled={!commitDraft.canCommit}
+			onclick={() => void runCommit({ stageAllFirst: false })}
+		>
+			Commit {stagedCount} file{stagedCount === 1 ? "" : "s"} to <code>{branch}</code>
+		</button>
+	{:else if hasWip}
+		<button
+			type="button"
+			class="primary"
+			disabled={!commitDraft.canCommit}
+			onclick={() => void runCommit({ stageAllFirst: true })}
+		>
+			Stage all &amp; commit
+		</button>
 	{/if}
 </div>
 
@@ -521,13 +532,12 @@
 		border-color: var(--accent);
 	}
 
-	/* Soft ruler at column 72 — DESIGN_SPEC.md §7. `ch` is relative to this element's own mono font,
-	 * matched to the textarea, so it lands on the 72nd character column. */
+	/* Soft ruler at the configured guide column. `ch` is relative to this element's mono font. */
 	.ruler {
 		position: absolute;
 		top: 6px;
 		bottom: 6px;
-		left: calc(var(--space-2) + 72ch);
+		left: calc(var(--space-2) + var(--guide-column));
 		width: 1px;
 		font-family: var(--font-mono);
 		font-size: var(--font-size-mono);

@@ -26,12 +26,26 @@ export type GraphViewRow = GraphLaneRow & {
 };
 
 export interface GraphStoreDeps {
-	getGraph(repoId: string): Promise<GraphTopologyRow[]>;
+	getGraph(repoId: string, excludedRefs?: string[]): Promise<GraphTopologyRow[]>;
 	getCommitMeta(repoId: string, shas: string[]): Promise<CommitMeta[]>;
 	getRefs(repoId: string): Promise<{ refs: RefInfo[]; head: HeadInfo }>;
 	getWorktrees(repoId: string): Promise<WorktreeInfo[]>;
 	onRepoChanged(repoId: string, handler: (kind: ChangeKind) => void): Promise<UnlistenFn>;
 	assignLanes(topology: readonly GraphTopologyRow[]): LaneAssignment;
+}
+
+const HIDDEN_BRANCHES_PREFIX = "branchkit:hidden-branches:";
+
+function loadHiddenBranches(key: string): string[] {
+	if (typeof localStorage === "undefined") return [];
+	try {
+		const parsed = JSON.parse(localStorage.getItem(`${HIDDEN_BRANCHES_PREFIX}${key}`) ?? "[]");
+		return Array.isArray(parsed)
+			? parsed.filter((name): name is string => typeof name === "string")
+			: [];
+	} catch {
+		return [];
+	}
 }
 
 const defaultDeps: GraphStoreDeps = {
@@ -89,6 +103,7 @@ export class GraphStore {
 	loading = $state(false);
 	error: unknown = $state(null);
 	laneComputeCount = $state(0);
+	hiddenBranches: string[] = $state([]);
 
 	rows: GraphViewRow[] = $derived(
 		this.laneRows.map((row, index) => ({
@@ -108,21 +123,30 @@ export class GraphStore {
 	#deps: GraphStoreDeps;
 	#unlisten: UnlistenFn | null = null;
 	#metaInFlight = new Set<string>();
+	/** Monotonic request id: overlapping watcher refreshes must never let an older refs snapshot
+	 * replace a newer one. Refs and Remote are emitted back-to-back by network operations, and
+	 * reads intentionally do not take the backend mutation lock (ARCHITECTURE §2). */
+	#refsRequestId = 0;
+	#topologyRequestId = 0;
+	#persistenceKey: string | null = null;
 
 	constructor(deps: Partial<GraphStoreDeps> = {}) {
 		this.#deps = { ...defaultDeps, ...deps };
 	}
 
-	async open(repoId: string): Promise<void> {
+	async open(repoId: string, persistenceKey: string = repoId): Promise<void> {
 		await this.close();
 		this.repoId = repoId;
+		this.#persistenceKey = encodeURIComponent(persistenceKey);
+		this.hiddenBranches = loadHiddenBranches(this.#persistenceKey);
 		this.loading = true;
 		this.error = null;
 		this.#unlisten = await this.#deps.onRepoChanged(repoId, (kind) => {
 			void this.handleChange(kind);
 		});
 		try {
-			await Promise.all([this.reloadTopology(), this.refreshRefs(), this.refreshWorktrees()]);
+			await this.refreshRefs();
+			await Promise.all([this.reloadTopology(), this.refreshWorktrees()]);
 		} catch (e) {
 			this.error = e;
 			throw e;
@@ -146,12 +170,26 @@ export class GraphStore {
 		this.pillsBySha = {};
 		this.worktrees = [];
 		this.head = null;
+		this.hiddenBranches = [];
 		this.#metaInFlight.clear();
+		this.#refsRequestId += 1;
+		this.#topologyRequestId += 1;
+		this.#persistenceKey = null;
 	}
 
 	async reloadTopology(): Promise<void> {
-		if (!this.repoId) return;
-		const topology = await this.#deps.getGraph(this.repoId);
+		const repoId = this.repoId;
+		if (!repoId) return;
+		const requestId = ++this.#topologyRequestId;
+		const excludedRefs = this.hiddenBranches.flatMap((name) => {
+			const local = this.refs.find((ref) => ref.kind === "branch" && ref.shortName === name);
+			return [
+				`refs/heads/${name}`,
+				...(local?.upstream ? [`refs/remotes/${local.upstream}`] : []),
+			];
+		});
+		const topology = await this.#deps.getGraph(repoId, excludedRefs);
+		if (requestId !== this.#topologyRequestId || this.repoId !== repoId) return;
 		const assignment = this.#deps.assignLanes(topology);
 		this.laneComputeCount += 1;
 		this.laneRows = assignment.rows;
@@ -161,9 +199,30 @@ export class GraphStore {
 		this.#metaInFlight.clear();
 	}
 
+	isBranchHidden(name: string): boolean {
+		return this.hiddenBranches.includes(name);
+	}
+
+	async toggleHiddenBranch(name: string): Promise<void> {
+		this.hiddenBranches = this.isBranchHidden(name)
+			? this.hiddenBranches.filter((branch) => branch !== name)
+			: [...this.hiddenBranches, name];
+		if (this.#persistenceKey && typeof localStorage !== "undefined") {
+			localStorage.setItem(
+				`${HIDDEN_BRANCHES_PREFIX}${this.#persistenceKey}`,
+				JSON.stringify(this.hiddenBranches),
+			);
+		}
+		await this.reloadTopology();
+	}
+
 	async refreshRefs(): Promise<void> {
-		if (!this.repoId) return;
-		const response = await this.#deps.getRefs(this.repoId);
+		const repoId = this.repoId;
+		if (!repoId) return;
+		const requestId = ++this.#refsRequestId;
+		const response = await this.#deps.getRefs(repoId);
+		// A later refresh (or close/reopen) superseded this read while it was in flight.
+		if (requestId !== this.#refsRequestId || this.repoId !== repoId) return;
 		this.refs = response.refs;
 		this.refsBySha = refsBySha(response.refs);
 		this.head = response.head;
@@ -204,8 +263,13 @@ export class GraphStore {
 		if (kind.kind === "operationProgress" || kind.kind === "workingTree" || kind.kind === "index") {
 			return;
 		}
-		if (kind.kind === "refs" || kind.kind === "remote") {
+		if (kind.kind === "refs") {
 			await Promise.all([this.refreshRefs(), this.refreshWorktrees()]);
+			return;
+		}
+		if (kind.kind === "remote") {
+			await this.refreshRefs();
+			await Promise.all([this.reloadTopology(), this.refreshWorktrees()]);
 			return;
 		}
 		if (kind.kind === "head") {

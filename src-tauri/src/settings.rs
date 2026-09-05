@@ -24,7 +24,7 @@ pub struct GeneralSettings {
     /// Minutes between auto-fetch ticks; `0` = off. DESIGN_SPEC §13 offers off/1/5/15.
     #[serde(default = "default_auto_fetch")]
     pub auto_fetch_interval_minutes: u32,
-    #[serde(default)]
+    #[serde(default = "default_open_last_repos")]
     pub open_last_repos_on_launch: bool,
     #[serde(default)]
     pub default_clone_dir: Option<String>,
@@ -34,11 +34,15 @@ fn default_auto_fetch() -> u32 {
     1
 }
 
+fn default_open_last_repos() -> bool {
+    true
+}
+
 impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
             auto_fetch_interval_minutes: default_auto_fetch(),
-            open_last_repos_on_launch: false,
+            open_last_repos_on_launch: default_open_last_repos(),
             default_clone_dir: None,
         }
     }
@@ -50,9 +54,7 @@ pub struct AppearanceSettings {
     /// "system" | "dark" | "light" — kept a plain string so it stays in lockstep with the
     /// frontend's existing `theme.svelte.ts` store rather than duplicating that enum.
     pub theme: String,
-    /// "comfortable" (28px) | "compact" (24px) — persisted for forward-compatibility; only
-    /// Comfortable is actually wired into the graph's row geometry today (geometry.ts's own
-    /// comment already defers Compact to a later prompt).
+    /// "comfortable" (28px) | "compact" (24px).
     pub graph_density: String,
     /// "relative" | "absolute".
     pub date_style: String,
@@ -118,12 +120,9 @@ pub enum CommitStyle {
     Conventional,
 }
 
-/// DESIGN_SPEC §13's AI section. Every field here renders in Settings today; wiring an actual
-/// provider (downloading the local model, calling Ollama/remote APIs) is out of scope until a
-/// later prompt — the master switch and provider fields simply have nothing listening yet. The
-/// remote API key itself is never in this struct: it lives in the keychain under
-/// `credentials::AI_API_KEY_ACCOUNT`, looked up separately by whatever later prompt wires the
-/// provider up.
+/// DESIGN_SPEC §13's AI section. Provider implementations consume these non-secret settings.
+/// The remote API key itself is never in this struct: it lives in the keychain under
+/// `credentials::AI_API_KEY_ACCOUNT` and is looked up by the selected provider.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSettings {
@@ -197,6 +196,7 @@ mod tests {
     fn defaults_match_design_spec() {
         let s = AppSettings::default();
         assert_eq!(s.general.auto_fetch_interval_minutes, 1);
+        assert!(s.general.open_last_repos_on_launch);
         assert!(s.git.combine_tracking_branches);
         assert_eq!(s.git.commit_summary_guide_length, 72);
         assert!(!s.ai.enabled);

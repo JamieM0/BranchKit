@@ -3,7 +3,7 @@
  * again" choice). Panel/graph chrome persists globally, not per repo (DESIGN_SPEC.md §3). */
 
 export type OptionalColumn = "author" | "date" | "sha";
-export type SizableColumn = "branch" | "graph" | "author" | "date" | "sha";
+export type SizableColumn = "branch" | "author" | "date" | "sha";
 
 interface Persisted {
 	author: boolean;
@@ -17,7 +17,6 @@ const STORAGE_KEY = "branchkit:graph-view";
 
 const DEFAULT_WIDTHS: Record<SizableColumn, number> = {
 	branch: 200,
-	graph: 140,
 	author: 130,
 	date: 96,
 	sha: 72,
@@ -25,11 +24,13 @@ const DEFAULT_WIDTHS: Record<SizableColumn, number> = {
 
 const MIN_WIDTH: Record<SizableColumn, number> = {
 	branch: 80,
-	graph: 48,
 	author: 72,
 	date: 72,
 	sha: 56,
 };
+
+const DEFAULT_GRAPH_WIDTH = 140;
+const MIN_GRAPH_WIDTH = 48;
 
 const MAX_WIDTH = 480;
 
@@ -55,7 +56,7 @@ class GraphViewStore {
 	detachDontAsk = $state(false);
 	/** Auto-computed GRAPH column width — sized to the widest visible lane layout by the view
 	 * (not persisted, not user-resizable): the column collapses/expands with the graph itself. */
-	graphAuto = $state(DEFAULT_WIDTHS.graph);
+	graphAuto = $state(DEFAULT_GRAPH_WIDTH);
 
 	constructor() {
 		const stored = load();
@@ -102,7 +103,7 @@ class GraphViewStore {
 	}
 
 	setGraphAuto(px: number) {
-		const clamped = Math.max(MIN_WIDTH.graph, Math.min(MAX_WIDTH, Math.round(px)));
+		const clamped = Math.max(MIN_GRAPH_WIDTH, Math.min(MAX_WIDTH, Math.round(px)));
 		if (clamped !== this.graphAuto) this.graphAuto = clamped;
 	}
 

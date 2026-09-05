@@ -2,7 +2,6 @@
 	import { settingsWindow, type SettingsSection } from "$lib/stores/settingsWindow.svelte";
 	import { focusOnMount } from "$lib/focus";
 	import { appSettings } from "$lib/stores/appSettings.svelte";
-	import { settings } from "$lib/stores/settings.svelte";
 	import { theme } from "$lib/stores/theme.svelte";
 	import { github } from "$lib/stores/github.svelte";
 	import { ai } from "$lib/stores/ai.svelte";
@@ -233,7 +232,13 @@
 				{:else if settingsWindow.section === "appearance"}
 					<h2>Appearance</h2>
 					<SettingField label="Theme" description="System follows your OS; Dark and Light are fixed.">
-						<select value={theme.setting} onchange={(e) => theme.set(e.currentTarget.value as "system" | "dark" | "light")}>
+						<select
+							value={theme.setting}
+							onchange={(e) =>
+								appSettings.update((d) => {
+									d.appearance.theme = e.currentTarget.value as "system" | "dark" | "light";
+								})}
+						>
 							<option value="system">System</option>
 							<option value="dark">Dark</option>
 							<option value="light">Light</option>
@@ -309,7 +314,14 @@
 						/>
 					</SettingField>
 					<SettingField label="Combine tracking branches" description="Show a tracked remote branch nested under its local branch instead of twice.">
-						<input type="checkbox" checked={settings.combineTrackingBranches} onchange={(e) => settings.setCombineTracking(e.currentTarget.checked)} />
+						<input
+							type="checkbox"
+							checked={appSettings.current.git.combineTrackingBranches}
+							onchange={(e) =>
+								appSettings.update((d) => {
+									d.git.combineTrackingBranches = e.currentTarget.checked;
+								})}
+						/>
 					</SettingField>
 					<SettingField label="Commit summary guide length" description="Where the composer's character countdown warns you a summary is getting long.">
 						<input

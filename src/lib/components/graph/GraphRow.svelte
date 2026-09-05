@@ -2,10 +2,11 @@
 	import RefPill from "./RefPill.svelte";
 	import BranchNameEditor from "./BranchNameEditor.svelte";
 	import CiDot from "./CiDot.svelte";
-	import { RIGHT_GUTTER, ROW_HEIGHT } from "$lib/graph/geometry";
+	import { RIGHT_GUTTER, rowHeightForDensity } from "$lib/graph/geometry";
 	import { graphView } from "$lib/stores/graphView.svelte";
 	import { branchEdit } from "$lib/stores/branchEdit.svelte";
 	import { filter, rowMatchesQuery } from "$lib/stores/filter.svelte";
+	import { graph } from "$lib/stores/graph.svelte";
 	import { dnd } from "$lib/stores/dnd.svelte";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
 	import { formatCommitDate } from "$lib/format";
@@ -54,6 +55,7 @@
 	} = $props();
 
 	let expanded = $state(false);
+	const rowHeight = $derived(rowHeightForDensity(appSettings.current.appearance.graphDensity));
 
 	const isMerge = $derived(row.kind === "commit" && row.parents.length > 1);
 	const descriptionPreview = $derived(
@@ -62,7 +64,7 @@
 
 	// Hide-eye: drop pills whose local branch is hidden from the graph (§5/§15.26).
 	const shownPills = $derived(
-		row.pills.filter((p) => !(p.localBranch && filter.isHidden(p.localBranch))),
+		row.pills.filter((p) => !(p.localBranch && graph.isBranchHidden(p.localBranch))),
 	);
 	const visiblePills = $derived(expanded ? shownPills : shownPills.slice(0, 2));
 	const overflowCount = $derived(Math.max(0, shownPills.length - 2));
@@ -126,7 +128,7 @@
 	role="row"
 	tabindex="-1"
 	aria-selected={selected}
-	style="height: {ROW_HEIGHT}px;"
+	style="height: {rowHeight}px;"
 	onclick={(e) => onSelect(row.sha, e)}
 	ondblclick={(e) => onActivate(row.sha, e)}
 	onmouseenter={() => onHover(row.sha)}

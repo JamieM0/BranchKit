@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from "svelte";
 	// phosphor-svelte: icon set requested by Jamie (replaces emoji glyphs).
 	import {
 		Archive,
@@ -17,6 +18,7 @@
 	import { fuzzyMatch } from "$lib/fuzzy";
 	import { graph } from "$lib/stores/graph.svelte";
 	import { settings } from "$lib/stores/settings.svelte";
+	import { appSettings } from "$lib/stores/appSettings.svelte";
 	import { filter } from "$lib/stores/filter.svelte";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
 	import { branchEdit } from "$lib/stores/branchEdit.svelte";
@@ -39,7 +41,7 @@
 
 	const repoId = $derived(graph.repoId);
 	const currentBranch = $derived(graph.head && !graph.head.detached ? graph.head.branch : null);
-	const model = $derived(buildPanelModel(graph.refs, settings.combineTrackingBranches));
+	const model = $derived(buildPanelModel(graph.refs, appSettings.current.git.combineTrackingBranches));
 
 	let query = $state("");
 	// Feed the shared filter (dims the graph) as the box changes.
@@ -134,6 +136,15 @@
 	let worktreeMenu = $state<{ wt: WorktreeInfo; x: number; y: number } | null>(null);
 	let removeConfirm = $state<{ path: string; armed: boolean } | null>(null);
 	let armTimer: ReturnType<typeof setTimeout> | undefined;
+	let tagDeleteConfirm = $state<{ name: string; armed: boolean } | null>(null);
+	let tagArmTimer: ReturnType<typeof setTimeout> | undefined;
+
+	async function expandTo(section: "local" | "remote" | "tags" | "stashes") {
+		settings.toggleLeftPanel();
+		collapsed = { ...collapsed, [section]: false };
+		await tick();
+		document.querySelector(`[data-section="${section}"]`)?.scrollIntoView({ block: "start" });
+	}
 
 	function openWorktreeMenu(wt: WorktreeInfo, e: MouseEvent) {
 		e.preventDefault();
@@ -200,9 +211,29 @@
 		// than reaching back into `tagMenu` after it has been cleared.
 		return [
 			{ type: "action", label: "Copy tag name", run: () => void actions.copyToClipboard(name, "Copied tag name") },
-			{ type: "action", label: "Delete tag", danger: true, run: () => void actions.deleteTag(repoId, name) },
+			{ type: "action", label: "Delete tag…", danger: true, run: () => requestDeleteTag(name) },
 			{ type: "action", label: "Delete local tag", danger: true, run: () => void actions.deleteLocalTag(repoId, name) },
 		];
+	}
+
+	function requestDeleteTag(name: string) {
+		clearTimeout(tagArmTimer);
+		tagDeleteConfirm = { name, armed: false };
+		tagArmTimer = setTimeout(() => {
+			if (tagDeleteConfirm) tagDeleteConfirm = { ...tagDeleteConfirm, armed: true };
+		}, 400);
+	}
+
+	function cancelDeleteTag() {
+		clearTimeout(tagArmTimer);
+		tagDeleteConfirm = null;
+	}
+
+	async function confirmDeleteTag() {
+		if (!repoId || !tagDeleteConfirm?.armed) return;
+		const name = tagDeleteConfirm.name;
+		cancelDeleteTag();
+		await actions.deleteTag(repoId, name);
 	}
 
 	const tagMenuItems: MenuItem[] = $derived(tagMenu && repoId ? itemsForTagMenu(repoId, tagMenu.name) : []);
@@ -246,10 +277,10 @@
 	{#if settings.leftPanelCollapsed}
 		<div class="rail">
 			<button type="button" class="rail-btn" title="Expand panel" onclick={() => settings.toggleLeftPanel()}>›</button>
-			<button type="button" class="rail-btn" title="Local branches" aria-label="Local branches"><GitBranch size={14} /><span class="rail-count">{model.locals.length}</span></button>
-			<button type="button" class="rail-btn" title="Remotes" aria-label="Remotes"><Cloud size={14} /><span class="rail-count">{model.remotes.reduce((n, g) => n + g.branches.length, 0)}</span></button>
-			<button type="button" class="rail-btn" title="Tags" aria-label="Tags"><Tag size={14} /><span class="rail-count">{model.tags.length}</span></button>
-			<button type="button" class="rail-btn" title="Stashes" aria-label="Stashes"><Archive size={14} /><span class="rail-count">{graph.stashes.length}</span></button>
+			<button type="button" class="rail-btn" title="Local branches" aria-label="Local branches" onclick={() => void expandTo("local")}><GitBranch size={14} /><span class="rail-count">{model.locals.length}</span></button>
+			<button type="button" class="rail-btn" title="Remotes" aria-label="Remotes" onclick={() => void expandTo("remote")}><Cloud size={14} /><span class="rail-count">{model.remotes.reduce((n, g) => n + g.branches.length, 0)}</span></button>
+			<button type="button" class="rail-btn" title="Tags" aria-label="Tags" onclick={() => void expandTo("tags")}><Tag size={14} /><span class="rail-count">{model.tags.length}</span></button>
+			<button type="button" class="rail-btn" title="Stashes" aria-label="Stashes" onclick={() => void expandTo("stashes")}><Archive size={14} /><span class="rail-count">{graph.stashes.length}</span></button>
 		</div>
 	{:else}
 		<div class="head">
@@ -267,7 +298,7 @@
 
 		<div class="sections">
 			<!-- LOCAL -->
-			<section>
+			<section data-section="local">
 				<button type="button" class="section-head" onclick={() => toggleSection("local")}>
 					<span class="chev" class:open={sectionOpen("local")}>▸</span>
 					LOCAL <span class="count">{locals.length}</span>
@@ -281,7 +312,7 @@
 							class:head-branch={pill.isHead}
 							onmouseenter={() => onRowHover(row.local.sha)}
 							onmouseleave={() => onRowHover(null)}
-							onclick={() => requestCheckout(pill)}
+							onclick={() => onRowClick(pill.sha)}
 							ondblclick={() => requestCheckout(pill)}
 							oncontextmenu={(e) => openMenu(pill, e)}
 						>
@@ -295,13 +326,13 @@
 							<button
 								type="button"
 								class="eye"
-								class:hidden-on={filter.isHidden(row.local.shortName)}
-								title={filter.isHidden(row.local.shortName) ? "Show in graph" : "Hide from graph"}
+								class:hidden-on={graph.isBranchHidden(row.local.shortName)}
+								title={graph.isBranchHidden(row.local.shortName) ? "Show in graph" : "Hide from graph"}
 								aria-label="Toggle graph visibility"
 								onclick={(e) => {
 									e.stopPropagation();
-									filter.toggleHidden(row.local.shortName);
-								}}>{#if filter.isHidden(row.local.shortName)}<EyeSlash size={12} />{:else}<Eye size={12} />{/if}</button
+									void graph.toggleHiddenBranch(row.local.shortName);
+								}}>{#if graph.isBranchHidden(row.local.shortName)}<EyeSlash size={12} />{:else}<Eye size={12} />{/if}</button
 							>
 						</div>
 					{/each}
@@ -311,7 +342,7 @@
 
 			<!-- REMOTES -->
 			{#each remoteGroups as group (group.name)}
-				<section>
+				<section data-section="remote">
 					<button type="button" class="section-head" onclick={() => toggleSection(`remote:${group.name}`)}>
 						<span class="chev" class:open={sectionOpen(`remote:${group.name}`)}>▸</span>
 						{group.name.toUpperCase()} <span class="count">{group.branches.length}</span>
@@ -324,7 +355,7 @@
 								class="row"
 								onmouseenter={() => onRowHover(branch.sha)}
 								onmouseleave={() => onRowHover(null)}
-								onclick={() => requestCheckout(pill)}
+								onclick={() => onRowClick(pill.sha)}
 								ondblclick={() => requestCheckout(pill)}
 								oncontextmenu={(e) => openMenu(pill, e)}
 							>
@@ -367,7 +398,7 @@
 
 			<!-- TAGS -->
 			{#if tags.length > 0}
-				<section>
+				<section data-section="tags">
 					<button type="button" class="section-head" onclick={() => toggleSection("tags")}>
 						<span class="chev" class:open={sectionOpen("tags")}>▸</span>
 						TAGS <span class="count">{tags.length}</span>
@@ -392,7 +423,7 @@
 
 			<!-- STASHES -->
 			{#if stashes.length > 0}
-				<section>
+				<section data-section="stashes">
 					<button type="button" class="section-head" onclick={() => toggleSection("stashes")}>
 						<span class="chev" class:open={sectionOpen("stashes")}>▸</span>
 						STASHES <span class="count">{stashes.length}</span>
@@ -403,7 +434,7 @@
 							<div
 								class="row"
 								onclick={() => onRowClick(stash.baseSha)}
-								ondblclick={() => repoId && actions.popStash(repoId, stash.selector, stash.subject)}
+								ondblclick={() => repoId && actions.popStash(repoId, stash.selector)}
 								onmouseenter={() => onRowHover(stash.baseSha)}
 								onmouseleave={() => onRowHover(null)}
 								oncontextmenu={(e) => openStashMenu(stash.selector, stash.subject, e)}
@@ -519,6 +550,22 @@
 			<button type="button" onclick={cancelRemoveWorktree}>Cancel</button>
 			<button type="button" class="danger-solid" disabled={!removeConfirm.armed} onclick={confirmRemoveWorktree}>
 				{removeConfirm.armed ? "Remove worktree" : "Hold…"}
+			</button>
+		</div>
+	</div>
+{/if}
+
+{#if tagDeleteConfirm}
+	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+	<div class="scrim" onclick={cancelDeleteTag}></div>
+	<div class="remove-confirm" role="dialog" aria-modal="true" aria-label="Delete tag from remote">
+		<p class="confirm-text">
+			Delete <code>{tagDeleteConfirm.name}</code> locally and from <code>origin</code> if it is published there? Other users may rely on this tag.
+		</p>
+		<div class="confirm-actions">
+			<button type="button" onclick={cancelDeleteTag}>Cancel</button>
+			<button type="button" class="danger-solid" disabled={!tagDeleteConfirm.armed} onclick={confirmDeleteTag}>
+				{tagDeleteConfirm.armed ? "Delete tag" : "Hold…"}
 			</button>
 		</div>
 	</div>

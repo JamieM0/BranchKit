@@ -1,12 +1,12 @@
 /** The rate-limited "found new commits" toast — DESIGN_SPEC.md §8/§15.19: "`main` is 3 behind —
  * **Pull**", current branch only, at most once a minute. Fires only when the behind-count
  * *increases* from what was last seen (a fetch just found new commits) — not on every refs
- * refresh, which would otherwise fire on every unrelated ref change too. Auto-fetch runs every
- * minute (ARCHITECTURE.md §7.2), so the rate limit is what keeps this from nagging on every tick
- * once behind is already nonzero. */
+ * refresh, which would otherwise fire on every unrelated ref change too. Auto-fetch follows the
+ * configured interval, while this independent rate limit prevents repeated notices. */
 
 import { toasts } from "./toasts.svelte";
 import { pull } from "$lib/actions";
+import { appSettings } from "$lib/stores/appSettings.svelte";
 
 const RATE_LIMIT_MS = 60_000;
 
@@ -26,7 +26,7 @@ export function notifyBehindIncrease(repoId: string, branch: string, behind: num
 			message: `\`${branch}\` is ${behind} behind`,
 			tone: "info",
 			icon: "download",
-			action: { label: "Pull", run: () => pull(repoId, "ff", branch) },
+			action: { label: "Pull", run: () => pull(repoId, appSettings.current.git.defaultPullMode, branch) },
 		});
 		tracked.set(repoId, { behind, lastToastAt: now });
 		return;

@@ -17,6 +17,14 @@ import { credentialDialog } from "$lib/stores/credentialDialog.svelte";
 import { github } from "$lib/stores/github.svelte";
 import { settingsWindow } from "$lib/stores/settingsWindow.svelte";
 
+const commitUndoToasts = new Map<string, number>();
+
+function dismissCommitUndo(repoId: string) {
+	const toastId = commitUndoToasts.get(repoId);
+	if (toastId !== undefined) toasts.dismiss(toastId);
+	commitUndoToasts.delete(repoId);
+}
+
 export interface AppErrorShape {
 	userMessage: string;
 	raw: string;
@@ -330,6 +338,7 @@ export async function push(repoId: string, force: boolean, branch: string): Prom
 	repos.setBusy(repoId, true);
 	try {
 		await ipc.push(repoId, force, branch);
+		dismissCommitUndo(repoId);
 		network.markOnline();
 		toasts.push({
 			message: force ? `Force-pushed \`${branch}\`` : `Pushed \`${branch}\``,
@@ -350,6 +359,7 @@ export async function publish(repoId: string, name: string): Promise<void> {
 	repos.setBusy(repoId, true);
 	try {
 		await ipc.publish(repoId, name);
+		dismissCommitUndo(repoId);
 		network.markOnline();
 		toasts.push({
 			message: `Published \`${name}\``,
@@ -446,14 +456,15 @@ export async function commit(
 		const sha = await ipc.commit(repoId, summary, description, amend);
 		const branch = graph.head && !graph.head.detached ? graph.head.branch : null;
 		commitDraft.reset();
-		toasts.push({
+		const toastId = toasts.push({
 			message: branch
 				? `Committed \`${sha.slice(0, 7)}\` to \`${branch}\``
 				: `Committed \`${sha.slice(0, 7)}\``,
 			tone: "success",
 			icon: "check",
-			action: amend ? undefined : { label: "Undo", run: () => undoCommit(repoId) },
+			action: amend ? undefined : { label: "Undo", run: () => undoCommit(repoId, sha) },
 		});
+		if (!amend) commitUndoToasts.set(repoId, toastId);
 		return true;
 	} catch (e) {
 		const { userMessage, raw } = asAppError(e);
@@ -472,9 +483,10 @@ export async function commitPrimary(repoId: string): Promise<boolean> {
 
 /** The commit toast's **Undo** — soft-reset the last commit; its changes return to the index
  * exactly as staged (§8/§15.13). Only ever wired up before the commit is pushed. */
-async function undoCommit(repoId: string): Promise<void> {
+async function undoCommit(repoId: string, expectedSha: string): Promise<void> {
 	try {
-		await ipc.undoCommit(repoId);
+		await ipc.undoCommit(repoId, expectedSha);
+		commitUndoToasts.delete(repoId);
 		toasts.push({
 			message: "Commit undone — changes are staged again",
 			tone: "info",
@@ -502,19 +514,20 @@ export async function stashPush(
 	}
 }
 
-/** Pop a stash (double-click a stash row, or the toolbar Pop button — always `stash@{0}`) with a
- * best-effort re-stash **Undo** (DESIGN_SPEC.md §4.5/§8/§15.18): the popped changes are now plain
- * uncommitted changes, so Undo just stashes the working tree again under the same message. */
-export async function popStash(repoId: string, selector: string, message: string): Promise<void> {
+/** Pop a stash (double-click a stash row, or the toolbar Pop button — always `stash@{0}`).
+ * SPEC-DEVIATION: the action is labelled "Restore stash" instead of "Undo": it recreates the
+ * exact removed stash object but intentionally leaves the applied files alone, because sweeping
+ * the whole current working tree back into a stash can capture unrelated edits made after pop. */
+export async function popStash(repoId: string, selector: string): Promise<void> {
 	try {
-		await ipc.stashPop(repoId, selector);
+		const popped = await ipc.stashPop(repoId, selector);
 		toasts.push({
 			message: "Popped stash",
 			tone: "success",
 			icon: "undo",
 			action: {
-				label: "Undo",
-				run: () => stashPush(repoId, { message, includeUntracked: true }),
+				label: "Restore stash",
+				run: () => ipc.restorePoppedStash(repoId, popped.sha, popped.subject),
 			},
 		});
 	} catch (e) {
@@ -642,6 +655,22 @@ export async function deleteLocalTag(repoId: string, name: string): Promise<void
 	}
 }
 
+export async function setUpstream(
+	repoId: string,
+	branch: string,
+	upstream: string,
+): Promise<boolean> {
+	try {
+		await ipc.setUpstream(repoId, branch, upstream);
+		toasts.push({ message: `Tracking \`${upstream}\``, tone: "success", icon: "check" });
+		return true;
+	} catch (e) {
+		const { userMessage, raw } = asAppError(e);
+		toasts.pushError(userMessage, raw);
+		return false;
+	}
+}
+
 /** Builds a web URL for `sha` on a known host (github.com/gitlab.com), or `null` for anything else
  * — "Copy link to this commit on remote" (GITKRAKEN_WORKFLOWS.md §2.9/§3.1). */
 export function commitWebUrl(remoteUrl: string, sha: string): string | null {
@@ -655,9 +684,17 @@ export function commitWebUrl(remoteUrl: string, sha: string): string | null {
 	return null;
 }
 
-/** Copies a web link to `sha` on `remote`, falling back to the bare sha for unrecognized hosts. */
-export async function copyCommitLink(repoId: string, remote: string, sha: string): Promise<void> {
+/** Copies a web link using origin when present, otherwise the repository's first configured
+ * remote. Falls back to the bare sha when no remote or recognized web host exists. */
+export async function copyCommitLink(repoId: string, sha: string): Promise<void> {
 	try {
+		const remotes = await ipc.listRemotes(repoId);
+		const remote = remotes.includes("origin") ? "origin" : remotes[0];
+		if (!remote) {
+			await navigator.clipboard?.writeText(sha);
+			toasts.push({ message: "Copied SHA (no remote configured)", tone: "success", icon: "check" });
+			return;
+		}
 		const url = await ipc.getRemoteUrl(repoId, remote);
 		const link = commitWebUrl(url, sha) ?? sha;
 		await navigator.clipboard?.writeText(link);

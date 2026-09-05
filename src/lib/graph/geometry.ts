@@ -1,9 +1,13 @@
 /** Pure layout maths for the commit graph — kept separate from the Svelte component so the row/lane
  * geometry and virtualization window can be unit-tested. ARCHITECTURE.md §5.4, DESIGN_SPEC.md §4.1. */
 
-/** Fixed row height — DESIGN_SPEC.md §4.1 ("Comfortable" density; §13's Compact 24px is a later
- * prompt). */
+/** Comfortable row height, retained as the default for pure geometry callers and tests. */
 export const ROW_HEIGHT = 28;
+export const COMPACT_ROW_HEIGHT = 24;
+
+export function rowHeightForDensity(density: "comfortable" | "compact"): number {
+	return density === "compact" ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
+}
 /** Rows rendered above and below the viewport — ARCHITECTURE.md §5.4. */
 export const OVERSCAN = 20;
 
@@ -44,10 +48,11 @@ export function visibleRowRange(
 	viewportHeight: number,
 	rowCount: number,
 	overscan: number = OVERSCAN,
+	rowHeight: number = ROW_HEIGHT,
 ): RowWindow {
 	if (rowCount === 0) return { start: 0, end: 0 };
-	const first = Math.floor(scrollTop / ROW_HEIGHT) - overscan;
-	const last = Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + overscan;
+	const first = Math.floor(scrollTop / rowHeight) - overscan;
+	const last = Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan;
 	return {
 		start: Math.max(0, first),
 		end: Math.min(rowCount, Math.max(0, last)),
@@ -55,12 +60,16 @@ export function visibleRowRange(
 }
 
 /** Total scrollable height for `rowCount` rows. */
-export function totalHeight(rowCount: number): number {
-	return rowCount * ROW_HEIGHT;
+export function totalHeight(rowCount: number, rowHeight: number = ROW_HEIGHT): number {
+	return rowCount * rowHeight;
 }
 
 /** New `scrollTop` that keeps `rowIndex` at the same on-screen offset it currently occupies —
  * the basis of refresh scroll-anchoring (DESIGN_SPEC.md §4.7 / §15.32). */
-export function anchoredScrollTop(rowIndex: number, offsetWithinList: number): number {
-	return Math.max(0, rowIndex * ROW_HEIGHT + offsetWithinList);
+export function anchoredScrollTop(
+	rowIndex: number,
+	offsetWithinList: number,
+	rowHeight: number = ROW_HEIGHT,
+): number {
+	return Math.max(0, rowIndex * rowHeight + offsetWithinList);
 }

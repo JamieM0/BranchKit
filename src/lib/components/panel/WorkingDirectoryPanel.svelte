@@ -122,24 +122,15 @@
 
 	// --- discard safety net (ARCHITECTURE.md §7.3, DESIGN_SPEC.md §7.4/§8/§15.12) ---
 
-	/** After any discard, the toast's **Undo** just restores the *latest* trash entry — each
-	 * discard writes exactly one, so "most recent" always means "the one this toast caused". */
-	async function undoLastDiscard() {
-		if (!repoId) return;
-		const entries = await ipc.listDiscarded(repoId);
-		const latest = entries[0];
-		if (latest) await ipc.restoreDiscarded(repoId, latest.id);
-	}
-
 	async function discardFile(path: string) {
 		if (!repoId) return;
 		try {
-			await ipc.discardFile(repoId, path);
+			const discarded = await ipc.discardFile(repoId, path);
 			toasts.push({
 				message: `Discarded ${path}`,
 				tone: "warn",
 				destructive: true,
-				action: { label: "Undo", run: undoLastDiscard },
+				action: { label: "Undo", run: () => ipc.restoreDiscarded(repoId, discarded.id) },
 			});
 		} catch (e) {
 			const { userMessage, raw } = asAppError(e);
@@ -175,12 +166,13 @@
 		confirmingDiscardAll = false;
 		discardAllArmed = false;
 		try {
-			await ipc.discardAll(repoId);
+			const discarded = await ipc.discardAll(repoId);
+			if (!discarded) return;
 			toasts.push({
 				message: `Discarded ${count} file${count === 1 ? "" : "s"}`,
 				tone: "warn",
 				destructive: true,
-				action: { label: "Undo", run: undoLastDiscard },
+				action: { label: "Undo", run: () => ipc.restoreDiscarded(repoId, discarded.id) },
 			});
 		} catch (e) {
 			const { userMessage, raw } = asAppError(e);

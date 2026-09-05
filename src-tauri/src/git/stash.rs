@@ -4,6 +4,7 @@
 //! ordinary commit-ish for those two functions already gives the right "what changed" view — no
 //! separate stash-diff parser needed.
 
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::error::AppError;
@@ -12,6 +13,13 @@ use crate::state::AppState;
 
 use super::exec::{git, GitOpts};
 use super::ops::{emit_changes, require_repo};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PoppedStash {
+    pub sha: String,
+    pub subject: String,
+}
 
 /// Stash all WIP — the toolbar Stash button and its dropdown's "with message…" / "including
 /// untracked" variants (DESIGN_SPEC.md §3.2). `message` empty means no `-m` (git's default
@@ -37,7 +45,11 @@ pub async fn stash_push(
         args.push(m);
     }
     let result = git(&handle.path, &args, GitOpts::default()).await;
-    emit_changes(&app, &repo_id, &[ChangeKind::WorkingTree, ChangeKind::Index]);
+    emit_changes(
+        &app,
+        &repo_id,
+        &[ChangeKind::WorkingTree, ChangeKind::Index],
+    );
     result?;
     Ok(())
 }
@@ -51,17 +63,74 @@ pub async fn stash_pop(
     state: State<'_, AppState>,
     repo_id: String,
     selector: String,
-) -> Result<(), AppError> {
+) -> Result<PoppedStash, AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
-    handle.begin_self_op(&[WatchedKind::WorkingTree, WatchedKind::Index, WatchedKind::Refs]);
-    let result = git(&handle.path, &["stash", "pop", &selector], GitOpts::default()).await;
+    // Resolve the object and label before `pop` removes its reflog entry. The commit object stays
+    // reachable long enough for the toast action to restore this exact stash later.
+    let sha_output = git(&handle.path, &["rev-parse", &selector], GitOpts::default()).await?;
+    let sha = String::from_utf8_lossy(&sha_output.stdout)
+        .trim()
+        .to_string();
+    let subject_output = git(
+        &handle.path,
+        &["show", "-s", "--format=%s", &selector],
+        GitOpts::default(),
+    )
+    .await?;
+    let subject = String::from_utf8_lossy(&subject_output.stdout)
+        .trim()
+        .to_string();
+    handle.begin_self_op(&[
+        WatchedKind::WorkingTree,
+        WatchedKind::Index,
+        WatchedKind::Refs,
+    ]);
+    let result = git(
+        &handle.path,
+        &["stash", "pop", &selector],
+        GitOpts::default(),
+    )
+    .await;
     emit_changes(
         &app,
         &repo_id,
         &[ChangeKind::WorkingTree, ChangeKind::Index, ChangeKind::Refs],
     );
     result?;
+    Ok(PoppedStash { sha, subject })
+}
+
+/// Recreate the exact stash entry removed by a successful pop. This deliberately does not run
+/// `stash push` against the current working tree: edits made after the pop are user work and must
+/// never be swept into the recovered stash.
+#[tauri::command]
+pub async fn restore_popped_stash(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repo_id: String,
+    sha: String,
+    subject: String,
+) -> Result<(), AppError> {
+    let handle = require_repo(&state, &repo_id)?;
+    let _guard = handle.op_queue.lock().await;
+    handle.begin_self_op(&[WatchedKind::Refs]);
+    restore_popped_stash_exact(&handle.path, &sha, &subject).await?;
+    emit_changes(&app, &repo_id, &[ChangeKind::Refs]);
+    Ok(())
+}
+
+pub async fn restore_popped_stash_exact(
+    repo: &std::path::Path,
+    sha: &str,
+    subject: &str,
+) -> Result<(), super::exec::GitError> {
+    git(
+        repo,
+        &["stash", "store", "-m", subject, sha],
+        GitOpts::default(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -76,8 +145,17 @@ pub async fn stash_apply(
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
     handle.begin_self_op(&[WatchedKind::WorkingTree, WatchedKind::Index]);
-    let result = git(&handle.path, &["stash", "apply", &selector], GitOpts::default()).await;
-    emit_changes(&app, &repo_id, &[ChangeKind::WorkingTree, ChangeKind::Index]);
+    let result = git(
+        &handle.path,
+        &["stash", "apply", &selector],
+        GitOpts::default(),
+    )
+    .await;
+    emit_changes(
+        &app,
+        &repo_id,
+        &[ChangeKind::WorkingTree, ChangeKind::Index],
+    );
     result?;
     Ok(())
 }
@@ -94,7 +172,12 @@ pub async fn stash_drop(
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
     handle.begin_self_op(&[WatchedKind::Refs]);
-    git(&handle.path, &["stash", "drop", &selector], GitOpts::default()).await?;
+    git(
+        &handle.path,
+        &["stash", "drop", &selector],
+        GitOpts::default(),
+    )
+    .await?;
     emit_changes(&app, &repo_id, &[ChangeKind::Refs]);
     Ok(())
 }

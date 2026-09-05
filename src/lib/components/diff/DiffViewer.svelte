@@ -9,12 +9,15 @@
 	import { escapeHtml, highlightLines } from "$lib/diff/highlight";
 	import { isLinePair, pairChangedLines, type RenderLine } from "$lib/diff/pairLines";
 	import { wordDiff } from "$lib/diff/wordDiff";
+	import { openPath } from "@tauri-apps/plugin-opener";
+	import { repos } from "$lib/stores/repo.svelte";
 
 	/** The diff viewer — DESIGN_SPEC.md §6.2. Replaces the graph center pane (the parent decides
 	 * that; this component only renders once it's mounted) with a breadcrumb back to the graph. */
 	let { target, onBack }: { target: DiffTarget; onBack: () => void } = $props();
 
 	const repoId = $derived(graph.repoId);
+	const repoRoot = $derived(repos.tabs.find((tab) => tab.id === repoId)?.path ?? null);
 	const language = $derived(languageForPath(target.path));
 
 	const HUNK_COLLAPSE_THRESHOLD = 400;
@@ -109,7 +112,7 @@
 		if (!id || busy) return;
 		busy = true;
 		try {
-			await ipc.discardHunk(id, target.path, hunkIndex);
+			const discarded = await ipc.discardHunk(id, target.path, hunkIndex);
 			await loadDiff();
 			toasts.push({
 				message: "Discarded a change",
@@ -118,11 +121,7 @@
 				action: {
 					label: "Undo",
 					run: async () => {
-						// A fresh call, not the id captured above — discardHunk's own trash write
-						// created a new entry each time, and the toast always refers to the latest.
-						const entries = await ipc.listDiscarded(id);
-						const latest = entries[0];
-						if (latest) await ipc.restoreDiscarded(id, latest.id);
+						await ipc.restoreDiscarded(id, discarded.id);
 						await loadDiff();
 					},
 				},
@@ -255,6 +254,16 @@
 		return IMAGE_MIME[ext] ?? "application/octet-stream";
 	}
 
+	async function openFileExternally() {
+		if (!repoRoot) return;
+		try {
+			await openPath(`${repoRoot}/${target.path}`);
+		} catch (e) {
+			const { userMessage, raw } = asAppError(e);
+			toasts.pushError(userMessage, raw);
+		}
+	}
+
 	$effect(() => {
 		void target;
 		void ignoreWhitespace;
@@ -323,10 +332,10 @@
 			Ignore whitespace
 		</label>
 		{#if ignoreWhitespace}<span class="ws-indicator" title="Whitespace-only changes are hidden">⌗ whitespace hidden</span>{/if}
-		<div class="stub-actions">
+		<div class="file-actions">
 			<button type="button" onclick={() => fileInspector.open(target.path, "history")}>File History</button>
 			<button type="button" onclick={() => fileInspector.open(target.path, "blame")}>Blame</button>
-			<button type="button" disabled title="Lands with the external-open integration (prompt 14)">Open file</button>
+			<button type="button" disabled={!repoRoot} onclick={() => void openFileExternally()}>Open file</button>
 		</div>
 	</div>
 
@@ -379,7 +388,7 @@
 		{:else if diff.isBinary}
 			<div class="binary">
 				<p>Binary file — no inline diff.</p>
-				<button type="button" disabled title="Lands with the external-open integration (prompt 14)">
+				<button type="button" disabled={!repoRoot} onclick={() => void openFileExternally()}>
 					Open in external tool
 				</button>
 			</div>
@@ -747,13 +756,13 @@
 		color: var(--warn);
 	}
 
-	.stub-actions {
+	.file-actions {
 		margin-left: auto;
 		display: flex;
 		gap: var(--space-2);
 	}
 
-	.stub-actions button {
+	.file-actions button {
 		border: 1px solid var(--border);
 		border-radius: var(--radius-control);
 		background: var(--raised);
@@ -764,11 +773,11 @@
 		cursor: pointer;
 	}
 
-	.stub-actions button:hover:not(:disabled) {
+	.file-actions button:hover:not(:disabled) {
 		background: var(--overlay);
 	}
 
-	.stub-actions button:disabled {
+	.file-actions button:disabled {
 		color: var(--text-faint);
 		cursor: not-allowed;
 	}
@@ -816,6 +825,10 @@
 		font: inherit;
 		font-size: 10px;
 		padding: 0 6px;
+		cursor: pointer;
+	}
+
+	.hunk-actions button:disabled {
 		cursor: not-allowed;
 	}
 
@@ -958,6 +971,10 @@
 		color: var(--text-faint);
 		font: inherit;
 		padding: var(--space-2) var(--space-3);
+		cursor: pointer;
+	}
+
+	.binary button:disabled {
 		cursor: not-allowed;
 	}
 

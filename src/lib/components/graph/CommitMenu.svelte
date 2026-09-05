@@ -146,8 +146,8 @@
 				{ type: "separator" },
 				{
 					type: "action",
-					label: "Copy link to this commit on remote: origin",
-					run: () => run(() => actions.copyCommitLink(repoId, "origin", sha)),
+					label: "Copy link to this commit on remote",
+					run: () => run(() => actions.copyCommitLink(repoId, sha)),
 				},
 				{ type: "action", label: "Create patch from commit", run: () => run(() => actions.createPatchFromCommit(repoId, sha)) },
 				{ type: "action", label: "Compare commit against working directory", run: () => run(() => onCompareWorking(sha)) },

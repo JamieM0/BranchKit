@@ -11,11 +11,12 @@
 
 use tauri::{AppHandle, State};
 
+use crate::credentials;
 use crate::error::AppError;
 use crate::events::{ChangeKind, WatchedKind};
 use crate::state::AppState;
 
-use super::exec::{git, git_with_stdin, GitOpts};
+use super::exec::{git, git_with_stdin, GitErrorKind, GitOpts};
 use super::ops::{emit_changes, require_repo};
 
 /// Messages at or below this length go on argv (`-m`); longer ones go over stdin (`-F -`) so we
@@ -96,9 +97,105 @@ pub async fn undo_commit(
     app: AppHandle,
     state: State<'_, AppState>,
     repo_id: String,
+    expected_sha: String,
 ) -> Result<(), AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
+
+    let current = git(&handle.path, &["rev-parse", "HEAD"], GitOpts::default()).await?;
+    let current_sha = String::from_utf8_lossy(&current.stdout).trim().to_string();
+    if current_sha != expected_sha {
+        return Err(AppError::new(
+            "That commit is no longer at HEAD, so it can't be undone safely",
+            format!("expected HEAD {expected_sha}, found {current_sha}"),
+        ));
+    }
+
+    // A successful push normally advances the local remote-tracking ref. Refuse the reset when
+    // any remote-tracking branch contains this exact HEAD; rewriting a public commit is never a
+    // valid toast-level Undo. This backend guard remains authoritative even if a stale toast is
+    // somehow still visible.
+    let contained = git(
+        &handle.path,
+        &[
+            "branch",
+            "-r",
+            "--contains",
+            &expected_sha,
+            "--format=%(refname)",
+        ],
+        GitOpts::default(),
+    )
+    .await?;
+    if !contained.stdout.is_empty() {
+        return Err(AppError::new(
+            "This commit is already on a remote branch and can't be undone safely",
+            String::from_utf8_lossy(&contained.stdout)
+                .trim()
+                .to_string(),
+        ));
+    }
+
+    // The remote-tracking ref can lag behind an external or just-completed push. Ask the actual
+    // configured upstream as the final guard. If the network check itself fails, propagate that
+    // failure and leave history untouched; uncertainty is not permission to rewrite HEAD.
+    let upstream = git(
+        &handle.path,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+        GitOpts::default(),
+    )
+    .await;
+    match upstream {
+        Ok(output) => {
+            let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Some((remote, branch)) = upstream.split_once('/') {
+                let remote_ref = format!("refs/heads/{branch}");
+                let helper = credentials::helper_config_args();
+                let mut args: Vec<&str> = helper.iter().map(String::as_str).collect();
+                args.extend(["ls-remote", "--heads", remote, &remote_ref]);
+                let remote_head = git(&handle.path, &args, GitOpts::network()).await?;
+                let remote_sha = String::from_utf8_lossy(&remote_head.stdout)
+                    .split_ascii_whitespace()
+                    .next()
+                    .map(str::to_string);
+                if remote_sha.as_deref() == Some(expected_sha.as_str()) {
+                    return Err(AppError::new(
+                        "This commit has been pushed and can't be undone safely",
+                        format!("{upstream} points to {expected_sha}"),
+                    ));
+                }
+                if let Some(remote_sha) = remote_sha {
+                    match git(
+                        &handle.path,
+                        &["merge-base", "--is-ancestor", &remote_sha, &expected_sha],
+                        GitOpts::default(),
+                    )
+                    .await
+                    {
+                        // Remote tip is an ancestor of local HEAD: this commit is genuinely local.
+                        Ok(_) => {}
+                        Err(error)
+                            if error.kind == GitErrorKind::NonZeroExit && error.code == Some(1) =>
+                        {
+                            return Err(AppError::new(
+                                "The upstream no longer sits behind this commit, so it can't be undone safely",
+                                format!("remote {upstream} is at {remote_sha}"),
+                            ));
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+            }
+        }
+        Err(error) if error.kind == GitErrorKind::NonZeroExit => {}
+        Err(error) => return Err(error.into()),
+    }
+
     handle.begin_self_op(&[
         WatchedKind::Head,
         WatchedKind::Index,
@@ -158,9 +255,13 @@ mod tests {
         git(dir.path(), &["add", "-A"], GitOpts::default())
             .await
             .unwrap();
-        git(dir.path(), &["commit", "-q", "-m", "seed"], GitOpts::default())
-            .await
-            .unwrap();
+        git(
+            dir.path(),
+            &["commit", "-q", "-m", "seed"],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
 
         // Stage a change, then commit it via the bare `git` calls the command wraps.
         std::fs::write(dir.path().join("f.txt"), "two\n").unwrap();

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Pill } from "$lib/graph/pills";
 	import * as actions from "$lib/actions";
-	import { filter } from "$lib/stores/filter.svelte";
+	import { graph } from "$lib/stores/graph.svelte";
 	import { worktreeDialog } from "$lib/stores/worktreeDialog.svelte";
 
 	/** Branch pill / panel-row right-click menu — GITKRAKEN_WORKFLOWS §3.2, DESIGN_SPEC §4.4.
@@ -31,9 +31,14 @@
 	const sourceRef = $derived(pill.localBranch ?? pill.remoteRef ?? pill.name);
 	const isCurrent = $derived(pill.localBranch !== null && pill.localBranch === currentBranch);
 
-	let mode = $state<"menu" | "confirmDelete">("menu");
+	let mode = $state<"menu" | "confirmDelete" | "setUpstream">("menu");
 	let armed = $state(false);
 	let armTimer: ReturnType<typeof setTimeout> | undefined;
+	let upstream = $state("");
+
+	$effect(() => {
+		if (mode === "menu") upstream = pill.upstream ?? pill.remoteRef ?? "origin/";
+	});
 
 	function close() {
 		clearTimeout(armTimer);
@@ -71,6 +76,11 @@
 		void navigator.clipboard?.writeText(pill.name).catch(() => {});
 		close();
 	}
+
+	async function submitUpstream() {
+		if (!pill.localBranch || !upstream.trim()) return;
+		if (await actions.setUpstream(repoId, pill.localBranch, upstream.trim())) close();
+	}
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
@@ -87,6 +97,7 @@
 		</button>
 		{#if pill.localBranch}
 			<button type="button" role="menuitem" onclick={() => run(() => onRename(pill))}>Rename…</button>
+			<button type="button" role="menuitem" onclick={() => (mode = "setUpstream")}>Set upstream…</button>
 			<button type="button" role="menuitem" class="danger" disabled={isCurrent} onclick={startDelete}>
 				Delete{isCurrent ? " (checked out)" : ""}
 			</button>
@@ -118,12 +129,12 @@
 			<button
 				type="button"
 				role="menuitem"
-				onclick={() => run(() => filter.toggleHidden(pill.localBranch!))}
+				onclick={() => run(() => graph.toggleHiddenBranch(pill.localBranch!))}
 			>
-				{filter.isHidden(pill.localBranch) ? "Show in graph" : "Hide in graph"}
+				{graph.isBranchHidden(pill.localBranch) ? "Show in graph" : "Hide in graph"}
 			</button>
 		{/if}
-	{:else}
+	{:else if mode === "confirmDelete"}
 		<p class="confirm-text">
 			<code>{pill.name}</code> has commits that aren't merged anywhere. Delete it anyway?
 		</p>
@@ -136,6 +147,17 @@
 				onclick={() => run(() => actions.deleteBranch(repoId, pill.localBranch!, true))}
 			>
 				{armed ? "Delete branch" : "Hold…"}
+			</button>
+		</div>
+	{:else}
+		<label class="field">
+			Remote branch
+			<input type="text" bind:value={upstream} placeholder="origin/main" />
+		</label>
+		<div class="confirm-actions">
+			<button type="button" onclick={close}>Cancel</button>
+			<button type="button" class="primary-solid" disabled={!upstream.trim()} onclick={submitUpstream}>
+				Set upstream
 			</button>
 		</div>
 	{/if}
@@ -213,6 +235,24 @@
 		font-family: var(--font-mono);
 	}
 
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		padding: var(--space-2);
+		font-size: 11px;
+		color: var(--text-muted);
+	}
+
+	.field input {
+		padding: var(--space-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-control);
+		background: var(--raised);
+		color: var(--text);
+		font: inherit;
+	}
+
 	.confirm-actions {
 		display: flex;
 		gap: var(--space-1);
@@ -235,6 +275,13 @@
 	.confirm-actions .danger-solid {
 		background: var(--danger);
 		border-color: var(--danger);
+		color: var(--bg);
+		font-weight: 600;
+	}
+
+	.confirm-actions .primary-solid {
+		background: var(--accent);
+		border-color: var(--accent);
 		color: var(--bg);
 		font-weight: 600;
 	}

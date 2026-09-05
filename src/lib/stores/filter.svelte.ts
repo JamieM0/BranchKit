@@ -1,20 +1,10 @@
-/** The universal filter + hidden-branch state — DESIGN_SPEC.md §5 / §15.24 / §15.26. The left
+/** The universal text filter — DESIGN_SPEC.md §5 / §15.24. The left
  * panel's one filter box feeds `query`; the graph reads it to *dim* (never remove) non-matching
- * rows, and each panel section filters its rows by the same query (fuzzy). The hidden set backs the
- * per-row hide-eye toggle.
- *
- * SPEC-DEVIATION: "hide from graph" here hides the branch's *pill* rather than recomputing topology
- * to drop the branch's exclusive commits — the latter needs a backend ref-exclusion pass that lands
- * with the toolbar/graph-scale prompt. The eye still removes the branch's visual presence in the
- * graph, which is the day-to-day intent. */
-
-import { SvelteSet } from "svelte/reactivity";
+ * rows, and each panel section filters its rows by the same query (fuzzy). Branch visibility lives
+ * in the graph store because it changes the backend topology query and lane assignment. */
 
 class FilterStore {
 	query = $state("");
-	/** Local branch short names hidden from the graph. */
-	hidden = new SvelteSet<string>();
-
 	set(query: string) {
 		this.query = query;
 	}
@@ -27,14 +17,6 @@ class FilterStore {
 		return this.query.trim().length > 0;
 	}
 
-	isHidden(name: string): boolean {
-		return this.hidden.has(name);
-	}
-
-	toggleHidden(name: string) {
-		if (this.hidden.has(name)) this.hidden.delete(name);
-		else this.hidden.add(name);
-	}
 }
 
 export const filter = new FilterStore();

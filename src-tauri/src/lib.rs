@@ -13,12 +13,6 @@ use tauri::Manager;
 
 use state::AppState;
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 /// Writes `contents` to `path` on disk — the "Create patch from commit/file" menu items save the
 /// patch text the frontend already fetched via IPC to wherever the native save dialog picked.
 /// Plain `std::fs`, no new crate: adding `tauri-plugin-fs` for this one write isn't worth a new
@@ -61,7 +55,6 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
             save_text_file,
             repo::open_repo,
             repo::clone_repo,
@@ -105,6 +98,7 @@ pub fn run() {
             git::ops::ignore_path,
             git::stash::stash_push,
             git::stash::stash_pop,
+            git::stash::restore_popped_stash,
             git::stash::stash_apply,
             git::stash::stash_drop,
             git::stash::get_stash_patch,
@@ -154,6 +148,7 @@ pub fn run() {
             credentials::generate_ssh_key,
             github::start_device_flow,
             github::poll_device_flow,
+            github::cancel_device_flow,
             github::get_github_connection,
             github::github_sign_out,
             github::api::list_pull_requests,
@@ -182,20 +177,10 @@ pub fn run() {
             // Make sure the local AI sidecar (if running) doesn't outlive the app — ARCHITECTURE.md
             // §10's "kill on app exit".
             if let tauri::RunEvent::Exit = event {
-                ai::local::shutdown_sidecar_blocking(app_handle, &app_handle.state::<ai::AiState>());
+                ai::local::shutdown_sidecar_blocking(
+                    app_handle,
+                    &app_handle.state::<ai::AiState>(),
+                );
             }
         });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn greet_includes_name() {
-        assert_eq!(
-            greet("BranchKit"),
-            "Hello, BranchKit! You've been greeted from Rust!"
-        );
-    }
 }

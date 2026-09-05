@@ -34,7 +34,7 @@
 
 	const items: MenuItem[] = [
 		{ type: "action", label: "Apply stash", run: () => run(() => actions.applyStash(repoId, selector)) },
-		{ type: "action", label: "Pop stash", run: () => run(() => actions.popStash(repoId, selector, subject)) },
+		{ type: "action", label: "Pop stash", run: () => run(() => actions.popStash(repoId, selector)) },
 		{
 			type: "action",
 			label: "Drop stash…",

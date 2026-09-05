@@ -1,11 +1,12 @@
 <script lang="ts">
-	import { RIGHT_GUTTER, ROW_HEIGHT } from "$lib/graph/geometry";
+	import { RIGHT_GUTTER, rowHeightForDensity } from "$lib/graph/geometry";
 	import { graphView } from "$lib/stores/graphView.svelte";
 	import { commitDraft } from "$lib/stores/commitDraft.svelte";
 	import { graphSelection } from "$lib/stores/graphSelection.svelte";
 	import { isModEvent } from "$lib/platform";
 	import type { WipRow } from "$lib/graph/wip";
 	import * as actions from "$lib/actions";
+	import { appSettings } from "$lib/stores/appSettings.svelte";
 
 	/** The WIP row — DESIGN_SPEC.md §4.2. Sits at the top of the graph while the working tree differs
 	 * from HEAD. Clicking the `// WIP` text opens an inline commit-summary editor two-way synced with
@@ -24,6 +25,7 @@
 	} = $props();
 
 	const counts = $derived(row.counts);
+	const rowHeight = $derived(rowHeightForDensity(appSettings.current.appearance.graphDensity));
 
 	/** Autofocus + select the inline input the moment it appears. */
 	function focusInput(node: HTMLInputElement) {
@@ -69,7 +71,7 @@
 	class:enter={animateIn}
 	role="row"
 	tabindex="-1"
-	style="height: {ROW_HEIGHT}px;"
+	style="height: {rowHeight}px;"
 	onclick={handleRowClick}
 >
 	<div class="cell branch" style="width: {graphView.widths.branch}px;"></div>

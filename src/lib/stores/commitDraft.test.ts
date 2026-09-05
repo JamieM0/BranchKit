@@ -1,12 +1,23 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { commitDraft, COMMIT_GUIDE } from "./commitDraft.svelte";
+import { commitDraft } from "./commitDraft.svelte";
+import { appSettings } from "./appSettings.svelte";
 
-beforeEach(() => commitDraft.reset());
+beforeEach(() => {
+	commitDraft.reset();
+	appSettings.current.git.commitSummaryGuideLength = 72;
+});
 
 describe("commitDraft counter (§7/§17)", () => {
 	it("counts down from 72 and never blocks", () => {
 		commitDraft.summary = "a".repeat(50);
-		expect(commitDraft.remaining).toBe(COMMIT_GUIDE - 50);
+		expect(commitDraft.remaining).toBe(22);
+	});
+
+	it("uses the configured guide length", () => {
+		appSettings.current.git.commitSummaryGuideLength = 50;
+		commitDraft.summary = "a".repeat(45);
+		expect(commitDraft.remaining).toBe(5);
+		expect(commitDraft.counter).toBe("warn");
 	});
 
 	it("is normal above 10 remaining, warns at ≤10, goes danger past 72", () => {

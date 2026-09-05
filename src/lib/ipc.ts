@@ -33,6 +33,7 @@ import type {
   LocalDownloadProgress,
   LocalModelState,
   PullRequest,
+  PoppedStash,
   RecentRepo,
   RefsResponse,
   RepoInfo,
@@ -43,10 +44,6 @@ import type {
 } from "./types";
 
 /** The ONLY place invoke() is called — ARCHITECTURE.md §1. */
-
-export async function greet(name: string): Promise<string> {
-  return invoke("greet", { name });
-}
 
 export async function openRepo(path: string): Promise<RepoInfo> {
   return invoke("open_repo", { path });
@@ -79,8 +76,8 @@ export async function setGitIdentity(
   return invoke("set_git_identity", { name, email });
 }
 
-export async function getGraph(repoId: string): Promise<GraphTopologyRow[]> {
-  const payload = await invoke<string>("get_graph", { repoId });
+export async function getGraph(repoId: string, excludedRefs: string[] = []): Promise<GraphTopologyRow[]> {
+  const payload = await invoke<string>("get_graph", { repoId, excludedRefs });
   return payload
     .split("\n")
     .filter(Boolean)
@@ -377,8 +374,16 @@ export async function stashPush(
 export async function stashPop(
   repoId: string,
   selector: string,
-): Promise<void> {
+): Promise<PoppedStash> {
   return invoke("stash_pop", { repoId, selector });
+}
+
+export async function restorePoppedStash(
+  repoId: string,
+  sha: string,
+  subject: string,
+): Promise<void> {
+  return invoke("restore_popped_stash", { repoId, sha, subject });
 }
 
 export async function stashApply(
@@ -461,13 +466,13 @@ export async function commit(
 }
 
 /** The commit toast's **Undo** — a soft reset of the last commit (DESIGN_SPEC.md §8/§15.13). */
-export async function undoCommit(repoId: string): Promise<void> {
-  return invoke("undo_commit", { repoId });
+export async function undoCommit(repoId: string, expectedSha: string): Promise<void> {
+  return invoke("undo_commit", { repoId, expectedSha });
 }
 
 // --- discard safety net (ARCHITECTURE.md §7.3, DESIGN_SPEC.md §7.4) ---
 
-export async function discardFile(repoId: string, path: string): Promise<void> {
+export async function discardFile(repoId: string, path: string): Promise<DiscardedEntry> {
   return invoke("discard_file", { repoId, path });
 }
 
@@ -475,11 +480,11 @@ export async function discardHunk(
   repoId: string,
   path: string,
   hunkIndex: number,
-): Promise<void> {
+): Promise<DiscardedEntry> {
   return invoke("discard_hunk", { repoId, path, hunkIndex });
 }
 
-export async function discardAll(repoId: string): Promise<void> {
+export async function discardAll(repoId: string): Promise<DiscardedEntry | null> {
   return invoke("discard_all", { repoId });
 }
 
@@ -674,8 +679,8 @@ export async function openInBrowser(url: string): Promise<void> {
 
 /** Native "Open repo" folder picker — not an `invoke()` call itself, but the dialog plugin is
  * the only sanctioned way to reach the OS filesystem picker, so it lives here alongside ipc. */
-export async function pickFolder(title: string): Promise<string | null> {
-  const result = await openDialog({ title, directory: true, multiple: false });
+export async function pickFolder(title: string, defaultPath?: string): Promise<string | null> {
+  const result = await openDialog({ title, directory: true, multiple: false, defaultPath });
   return typeof result === "string" ? result : null;
 }
 
@@ -765,6 +770,10 @@ export async function pollDeviceFlow(
   expiresIn: number,
 ): Promise<GithubUser> {
   return invoke("poll_device_flow", { deviceCode, interval, expiresIn });
+}
+
+export async function cancelDeviceFlow(): Promise<void> {
+  return invoke("cancel_device_flow");
 }
 
 export async function getGithubConnection(): Promise<GithubUser | null> {

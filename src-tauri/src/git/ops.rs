@@ -13,6 +13,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
+use crate::credentials;
 use crate::error::AppError;
 use crate::events::{ChangeKind, WatchedKind};
 use crate::state::{AppState, RepoHandle};
@@ -109,7 +110,11 @@ pub async fn checkout_branch(
 ) -> Result<(), AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
-    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::WorkingTree, WatchedKind::Index]);
+    handle.begin_self_op(&[
+        WatchedKind::Head,
+        WatchedKind::WorkingTree,
+        WatchedKind::Index,
+    ]);
     git(&handle.path, &["checkout", &name], GitOpts::default()).await?;
     emit_changes(&app, &repo_id, &[ChangeKind::Head]);
     Ok(())
@@ -135,7 +140,12 @@ pub async fn checkout_remote(
     let local = local.to_string();
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
-    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::Refs, WatchedKind::WorkingTree, WatchedKind::Index]);
+    handle.begin_self_op(&[
+        WatchedKind::Head,
+        WatchedKind::Refs,
+        WatchedKind::WorkingTree,
+        WatchedKind::Index,
+    ]);
 
     let local_exists = branch_tip(&handle.path, &local).await.is_ok();
     if local_exists {
@@ -169,7 +179,11 @@ pub async fn checkout_previous(
 ) -> Result<(), AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
-    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::WorkingTree, WatchedKind::Index]);
+    handle.begin_self_op(&[
+        WatchedKind::Head,
+        WatchedKind::WorkingTree,
+        WatchedKind::Index,
+    ]);
     git(&handle.path, &["checkout", "-"], GitOpts::default()).await?;
     emit_changes(&app, &repo_id, &[ChangeKind::Head]);
     Ok(())
@@ -186,8 +200,17 @@ pub async fn checkout_detached(
 ) -> Result<(), AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
-    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::WorkingTree, WatchedKind::Index]);
-    git(&handle.path, &["checkout", "--detach", &sha], GitOpts::default()).await?;
+    handle.begin_self_op(&[
+        WatchedKind::Head,
+        WatchedKind::WorkingTree,
+        WatchedKind::Index,
+    ]);
+    git(
+        &handle.path,
+        &["checkout", "--detach", &sha],
+        GitOpts::default(),
+    )
+    .await?;
     emit_changes(&app, &repo_id, &[ChangeKind::Head]);
     Ok(())
 }
@@ -252,7 +275,11 @@ pub async fn create_branch(
     let _guard = handle.op_queue.lock().await;
     let start = sha.as_deref();
     if checkout {
-        handle.begin_self_op(&[WatchedKind::Head, WatchedKind::Refs, WatchedKind::WorkingTree]);
+        handle.begin_self_op(&[
+            WatchedKind::Head,
+            WatchedKind::Refs,
+            WatchedKind::WorkingTree,
+        ]);
         let mut args = vec!["checkout", "-b", &name];
         if let Some(start) = start {
             args.push(start);
@@ -283,7 +310,12 @@ pub async fn rename_branch(
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
     handle.begin_self_op(&[WatchedKind::Refs, WatchedKind::Head]);
-    git(&handle.path, &["branch", "-m", &old_name, &new_name], GitOpts::default()).await?;
+    git(
+        &handle.path,
+        &["branch", "-m", &old_name, &new_name],
+        GitOpts::default(),
+    )
+    .await?;
     emit_changes(&app, &repo_id, &[ChangeKind::Refs, ChangeKind::Head]);
     Ok(())
 }
@@ -305,7 +337,12 @@ pub async fn delete_branch(
     let sha = branch_tip(&handle.path, &name).await?;
     handle.begin_self_op(&[WatchedKind::Refs]);
     let flag = if force { "-D" } else { "-d" };
-    git(&handle.path, &["branch", flag, "--", &name], GitOpts::default()).await?;
+    git(
+        &handle.path,
+        &["branch", flag, "--", &name],
+        GitOpts::default(),
+    )
+    .await?;
     emit_changes(&app, &repo_id, &[ChangeKind::Refs]);
     Ok(sha)
 }
@@ -344,7 +381,12 @@ pub async fn merge_ref(
 ) -> Result<(), AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
-    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::Refs, WatchedKind::WorkingTree, WatchedKind::Index]);
+    handle.begin_self_op(&[
+        WatchedKind::Head,
+        WatchedKind::Refs,
+        WatchedKind::WorkingTree,
+        WatchedKind::Index,
+    ]);
     let mut args = vec!["merge", "--no-edit"];
     if allow_unrelated {
         args.push("--allow-unrelated-histories");
@@ -367,7 +409,12 @@ pub async fn rebase_onto(
 ) -> Result<(), AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
-    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::Refs, WatchedKind::WorkingTree, WatchedKind::Index]);
+    handle.begin_self_op(&[
+        WatchedKind::Head,
+        WatchedKind::Refs,
+        WatchedKind::WorkingTree,
+        WatchedKind::Index,
+    ]);
     let result = git(&handle.path, &["rebase", &onto], GitOpts::default()).await;
     emit_changes(&app, &repo_id, &[ChangeKind::Head]);
     result?;
@@ -390,8 +437,17 @@ pub async fn fast_forward(
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
     if is_current {
-        handle.begin_self_op(&[WatchedKind::Head, WatchedKind::WorkingTree, WatchedKind::Index]);
-        git(&handle.path, &["merge", "--ff-only", &source], GitOpts::default()).await?;
+        handle.begin_self_op(&[
+            WatchedKind::Head,
+            WatchedKind::WorkingTree,
+            WatchedKind::Index,
+        ]);
+        git(
+            &handle.path,
+            &["merge", "--ff-only", &source],
+            GitOpts::default(),
+        )
+        .await?;
         emit_changes(&app, &repo_id, &[ChangeKind::Head]);
     } else {
         handle.begin_self_op(&[WatchedKind::Refs]);
@@ -471,7 +527,11 @@ pub async fn cherry_pick(
 ) -> Result<(), AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
-    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::WorkingTree, WatchedKind::Index]);
+    handle.begin_self_op(&[
+        WatchedKind::Head,
+        WatchedKind::WorkingTree,
+        WatchedKind::Index,
+    ]);
     let result = git(&handle.path, &["cherry-pick", &sha], GitOpts::default()).await;
     emit_changes(&app, &repo_id, &[ChangeKind::Head]);
     result?;
@@ -490,8 +550,17 @@ pub async fn revert_commit(
 ) -> Result<(), AppError> {
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
-    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::WorkingTree, WatchedKind::Index]);
-    let result = git(&handle.path, &["revert", "--no-edit", &sha], GitOpts::default()).await;
+    handle.begin_self_op(&[
+        WatchedKind::Head,
+        WatchedKind::WorkingTree,
+        WatchedKind::Index,
+    ]);
+    let result = git(
+        &handle.path,
+        &["revert", "--no-edit", &sha],
+        GitOpts::default(),
+    )
+    .await;
     emit_changes(&app, &repo_id, &[ChangeKind::Head]);
     result?;
     Ok(())
@@ -515,7 +584,11 @@ pub async fn reset_to(
     };
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
-    handle.begin_self_op(&[WatchedKind::Head, WatchedKind::WorkingTree, WatchedKind::Index]);
+    handle.begin_self_op(&[
+        WatchedKind::Head,
+        WatchedKind::WorkingTree,
+        WatchedKind::Index,
+    ]);
     git(&handle.path, &["reset", flag, &sha], GitOpts::default()).await?;
     emit_changes(&app, &repo_id, &[ChangeKind::Head]);
     Ok(())
@@ -537,7 +610,14 @@ pub async fn create_tag(
     handle.begin_self_op(&[WatchedKind::Refs]);
     let message = message.filter(|m| !m.trim().is_empty());
     let result = match message.as_deref() {
-        Some(m) => git(&handle.path, &["tag", "-a", "-m", m, &name, &sha], GitOpts::default()).await,
+        Some(m) => {
+            git(
+                &handle.path,
+                &["tag", "-a", "-m", m, &name, &sha],
+                GitOpts::default(),
+            )
+            .await
+        }
         None => git(&handle.path, &["tag", &name, &sha], GitOpts::default()).await,
     };
     emit_changes(&app, &repo_id, &[ChangeKind::Refs]);
@@ -569,12 +649,10 @@ pub async fn delete_tag(
 
     if has_origin(&handle.path).await? {
         let remote_ref = format!("refs/tags/{name}");
-        git(
-            &handle.path,
-            &["push", "--progress", "origin", "--delete", &remote_ref],
-            GitOpts::network(),
-        )
-        .await?;
+        let helper = credentials::helper_config_args();
+        let mut args: Vec<&str> = helper.iter().map(String::as_str).collect();
+        args.extend(["push", "--progress", "origin", "--delete", &remote_ref]);
+        git(&handle.path, &args, GitOpts::network()).await?;
     }
     git(&handle.path, &["tag", "-d", &name], GitOpts::default()).await?;
     emit_changes(&app, &repo_id, &[ChangeKind::Refs]);
@@ -607,7 +685,12 @@ pub async fn get_remote_url(
     remote: String,
 ) -> Result<String, AppError> {
     let handle = require_repo(&state, &repo_id)?;
-    let output = git(&handle.path, &["remote", "get-url", &remote], GitOpts::default()).await?;
+    let output = git(
+        &handle.path,
+        &["remote", "get-url", &remote],
+        GitOpts::default(),
+    )
+    .await?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
@@ -645,7 +728,12 @@ pub async fn add_remote(
     let handle = require_repo(&state, &repo_id)?;
     let _guard = handle.op_queue.lock().await;
     handle.begin_self_op(&[WatchedKind::Remote]);
-    let result = git(&handle.path, &["remote", "add", &name, &url], GitOpts::default()).await;
+    let result = git(
+        &handle.path,
+        &["remote", "add", &name, &url],
+        GitOpts::default(),
+    )
+    .await;
     emit_changes(&app, &repo_id, &[ChangeKind::Remote]);
     result?;
     Ok(())

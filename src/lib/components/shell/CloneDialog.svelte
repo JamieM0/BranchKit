@@ -1,6 +1,7 @@
 <script lang="ts">
   import { pickFolder } from "$lib/ipc";
   import { repos } from "$lib/stores/repo.svelte";
+  import { appSettings } from "$lib/stores/appSettings.svelte";
 
   let { onDismiss }: { onDismiss: () => void } = $props();
 
@@ -13,7 +14,7 @@
   }
 
   let url = $state("");
-  let parentDir: string | null = $state(null);
+  let parentDir: string | null = $state(appSettings.current.general.defaultCloneDir);
   let folderName = $state("");
   let lastSuggested = $state("");
   let phase: Phase = $state("form");
@@ -38,7 +39,7 @@
   let cloningTab = $derived(repos.tabs.find((t) => t.id.startsWith("pending:")));
 
   async function chooseParent() {
-    const dir = await pickFolder("Clone into…");
+    const dir = await pickFolder("Clone into…", parentDir ?? appSettings.current.general.defaultCloneDir ?? undefined);
     if (dir) parentDir = dir;
   }
 

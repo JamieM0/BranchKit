@@ -15,6 +15,26 @@ function freshInvalidation(): Invalidation {
 	return { status: true, refs: true, graph: true };
 }
 
+interface PersistedSession {
+	paths: string[];
+	activePath: string | null;
+}
+
+const SESSION_STORAGE_KEY = "branchkit:repo-session";
+
+function loadSession(): PersistedSession {
+	if (typeof localStorage === "undefined") return { paths: [], activePath: null };
+	try {
+		const parsed = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY) ?? "null") as Partial<PersistedSession> | null;
+		return {
+			paths: Array.isArray(parsed?.paths) ? parsed.paths.filter((path): path is string => typeof path === "string") : [],
+			activePath: typeof parsed?.activePath === "string" ? parsed.activePath : null,
+		};
+	} catch {
+		return { paths: [], activePath: null };
+	}
+}
+
 export interface RepoTab {
 	/** A real backend repo id once open, or `pending:{requestId}` while a clone is in flight. */
 	id: string;
@@ -54,10 +74,21 @@ export function applyChangeKind(invalidate: Invalidation, kind: ChangeKind): Inv
 class RepoStore {
 	tabs: RepoTab[] = $state([]);
 	activeId: string | null = $state(null);
+	restoringSession = $state(false);
+	restoreAttempted = $state(false);
 
 	active: RepoTab | null = $derived(this.tabs.find((t) => t.id === this.activeId) ?? null);
 
 	#unlisten = new Map<string, UnlistenFn>();
+	#suspendSessionPersistence = false;
+
+	#persistSession() {
+		if (this.#suspendSessionPersistence || typeof localStorage === "undefined") return;
+		const realTabs = this.tabs.filter((tab) => !tab.id.startsWith("pending:"));
+		const activePath = realTabs.find((tab) => tab.id === this.activeId)?.path ?? null;
+		const session: PersistedSession = { paths: realTabs.map((tab) => tab.path), activePath };
+		localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+	}
 
 	#tabIndex(id: string): number {
 		return this.tabs.findIndex((t) => t.id === id);
@@ -91,12 +122,14 @@ class RepoStore {
 		const existing = this.#tabIndex(info.id);
 		if (existing !== -1) {
 			this.activeId = info.id;
+			this.#persistSession();
 			return this.tabs[existing];
 		}
 		const tab = this.#tabFromInfo(info);
 		this.tabs.push(tab);
 		this.activeId = tab.id;
 		await this.#subscribe(tab.id);
+		this.#persistSession();
 		return tab;
 	}
 
@@ -135,10 +168,12 @@ class RepoStore {
 			}
 			if (this.activeId === pendingId) this.activeId = tab.id;
 			await this.#subscribe(tab.id);
+			this.#persistSession();
 			return tab;
 		} catch (e) {
 			this.tabs = this.tabs.filter((t) => t.id !== pendingId);
 			if (this.activeId === pendingId) this.activeId = this.tabs.at(-1)?.id ?? null;
+			this.#persistSession();
 			throw e;
 		} finally {
 			await unlisten();
@@ -160,6 +195,7 @@ class RepoStore {
 			const next = this.tabs[i] ?? this.tabs[i - 1];
 			this.activeId = next?.id ?? null;
 		}
+		this.#persistSession();
 	}
 
 	/** Toggles the tab's spinner overlay for a long-running op in that repo — DESIGN_SPEC.md §3.1
@@ -172,13 +208,19 @@ class RepoStore {
 	}
 
 	switchTo(id: string) {
-		if (this.#tabIndex(id) !== -1) this.activeId = id;
+		if (this.#tabIndex(id) !== -1) {
+			this.activeId = id;
+			this.#persistSession();
+		}
 	}
 
 	/** Cmd+1…9 — DESIGN_SPEC.md §3.1. `n` is 1-indexed. */
 	switchToIndex(n: number) {
 		const tab = this.tabs[n - 1];
-		if (tab) this.activeId = tab.id;
+		if (tab) {
+			this.activeId = tab.id;
+			this.#persistSession();
+		}
 	}
 
 	switchToNextOrPrevious(direction: 1 | -1) {
@@ -186,6 +228,7 @@ class RepoStore {
 		const i = Math.max(this.#tabIndex(this.activeId ?? ""), 0);
 		const next = (i + direction + this.tabs.length) % this.tabs.length;
 		this.activeId = this.tabs[next].id;
+		this.#persistSession();
 	}
 
 	reorder(fromIndex: number, toIndex: number) {
@@ -202,6 +245,34 @@ class RepoStore {
 		const [moved] = tabs.splice(fromIndex, 1);
 		tabs.splice(toIndex, 0, moved);
 		this.tabs = tabs;
+		this.#persistSession();
+	}
+
+	/** Reopens the last session in saved tab order, including linked-worktree paths. Missing or
+	 * invalid repositories are skipped without preventing the remaining tabs from opening. */
+	async restoreLastSession(): Promise<string[]> {
+		if (this.restoreAttempted) return [];
+		this.restoreAttempted = true;
+		this.restoringSession = true;
+		const saved = loadSession();
+		const failures: string[] = [];
+		this.#suspendSessionPersistence = true;
+		try {
+			for (const path of saved.paths) {
+				try {
+					await this.open(path);
+				} catch {
+					failures.push(path);
+				}
+			}
+			const active = this.tabs.find((tab) => tab.path === saved.activePath);
+			if (active) this.activeId = active.id;
+		} finally {
+			this.#suspendSessionPersistence = false;
+			this.restoringSession = false;
+			this.#persistSession();
+		}
+		return failures;
 	}
 
 	/** Consumers (status/refs/graph stores, added in later prompts) call this once they've

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { checkGitIdentity, setGitIdentity } from "$lib/ipc";
   import { onboarding } from "$lib/stores/onboarding.svelte";
-  import { theme, type ThemeSetting } from "$lib/stores/theme.svelte";
+  import type { ThemeSetting } from "$lib/stores/theme.svelte";
+  import { appSettings } from "$lib/stores/appSettings.svelte";
 
   type Step = "theme" | "identity";
   let step: Step = $state("theme");
@@ -31,7 +32,9 @@
   });
 
   function chooseTheme(setting: ThemeSetting) {
-    theme.set(setting);
+    appSettings.update((settings) => {
+      settings.appearance.theme = setting;
+    });
     step = "identity";
   }
 

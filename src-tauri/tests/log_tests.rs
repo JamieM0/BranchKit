@@ -133,10 +133,12 @@ async fn graph_rows_do_not_duplicate_the_stash_commit() {
     repo.run(&["stash", "push", "-m", "wip changes"]).await;
 
     let stash_out = repo.run(&["rev-parse", "refs/stash"]).await;
-    let stash_sha = String::from_utf8_lossy(&stash_out.stdout).trim().to_string();
+    let stash_sha = String::from_utf8_lossy(&stash_out.stdout)
+        .trim()
+        .to_string();
     let stash_sha = stash_sha.as_str();
 
-    let rows = log::graph_rows(repo.path()).await.expect("graph rows");
+    let rows = log::graph_rows(repo.path(), &[]).await.expect("graph rows");
 
     // No sha appears twice across all rows.
     let mut seen = std::collections::HashSet::new();
@@ -167,4 +169,23 @@ async fn stash_list_empty_when_no_stashes() {
 
     let stashes = log::stash_list(repo.path()).await.expect("stash list");
     assert!(stashes.is_empty());
+}
+
+#[tokio::test]
+async fn excluding_a_branch_removes_its_exclusive_commits_from_topology() {
+    let repo = TestRepo::init().await;
+    repo.write("base.txt", "base\n");
+    let base = repo.commit_all("base").await;
+
+    repo.checkout_new("hidden").await;
+    repo.write("hidden.txt", "hidden branch only\n");
+    let hidden_tip = repo.commit_all("hidden work").await;
+    repo.checkout("main").await;
+
+    let topology = log::topology_excluding(repo.path(), &["refs/heads/hidden".to_string()])
+        .await
+        .expect("filtered topology");
+
+    assert!(topology.iter().any(|commit| commit.sha == base));
+    assert!(!topology.iter().any(|commit| commit.sha == hidden_tip));
 }

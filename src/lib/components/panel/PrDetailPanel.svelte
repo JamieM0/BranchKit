@@ -13,6 +13,9 @@
 	let mergeMethod: "merge" | "squash" | "rebase" = $state("merge");
 	let merging = $state(false);
 	let checkingOut = $state(false);
+	let confirmingMerge = $state(false);
+	let mergeArmed = $state(false);
+	let mergeArmTimer: ReturnType<typeof setTimeout> | undefined;
 
 	$effect(() => {
 		if (pr) void githubChecks.request(repoId, pr.headSha);
@@ -21,11 +24,26 @@
 	const checks = $derived(pr ? githubChecks.get(pr.headSha) : null);
 
 	async function doMerge() {
-		if (!pr) return;
+		if (!pr || !mergeArmed) return;
+		confirmingMerge = false;
+		mergeArmed = false;
 		merging = true;
 		const ok = await actions.mergePullRequest(repoId, pr.number, mergeMethod);
 		merging = false;
 		if (ok) await github.loadPullRequests(repoId);
+	}
+
+	function requestMerge() {
+		confirmingMerge = true;
+		mergeArmed = false;
+		clearTimeout(mergeArmTimer);
+		mergeArmTimer = setTimeout(() => (mergeArmed = true), 400);
+	}
+
+	function cancelMerge() {
+		clearTimeout(mergeArmTimer);
+		confirmingMerge = false;
+		mergeArmed = false;
 	}
 
 	async function doCheckout() {
@@ -89,11 +107,28 @@
 						<option value="squash">Squash and merge</option>
 						<option value="rebase">Rebase and merge</option>
 					</select>
-					<button type="button" class="danger-solid" disabled={merging} onclick={doMerge}>
+					<button type="button" class="danger-solid" disabled={merging} onclick={requestMerge}>
 						{merging ? "Merging…" : "Merge…"}
 					</button>
 				</div>
 			{/if}
+		</div>
+	</div>
+{/if}
+
+{#if pr && confirmingMerge}
+	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+	<div class="scrim" onclick={cancelMerge}></div>
+	<div class="merge-confirm" role="dialog" aria-modal="true" aria-label="Confirm pull request merge">
+		<p>
+			{mergeMethod === "squash" ? "Squash and merge" : mergeMethod === "rebase" ? "Rebase and merge" : "Merge"}
+			pull request <strong>#{pr.number}</strong> into <code>{pr.baseRef}</code>? This updates the shared remote branch.
+		</p>
+		<div class="confirm-actions">
+			<button type="button" onclick={cancelMerge}>Cancel</button>
+			<button type="button" class="danger-solid" disabled={!mergeArmed} onclick={doMerge}>
+				{mergeArmed ? "Merge pull request" : "Hold…"}
+			</button>
 		</div>
 	</div>
 {/if}
@@ -104,6 +139,43 @@
 		flex-direction: column;
 		height: 100%;
 		overflow: hidden;
+	}
+
+	.scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 60;
+		background: rgb(0 0 0 / 35%);
+	}
+
+	.merge-confirm {
+		position: fixed;
+		z-index: 61;
+		left: 50%;
+		top: 50%;
+		transform: translate(-50%, -50%);
+		width: min(420px, 88vw);
+		padding: var(--space-4);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-card);
+		background: var(--overlay);
+		box-shadow: 0 16px 48px rgb(0 0 0 / 35%);
+	}
+
+	.merge-confirm p {
+		margin: 0 0 var(--space-3);
+		font-size: 12px;
+		line-height: 1.5;
+	}
+
+	.merge-confirm code {
+		font-family: var(--font-mono);
+	}
+
+	.confirm-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: var(--space-2);
 	}
 
 	.head {

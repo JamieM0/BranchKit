@@ -6,6 +6,8 @@
 	import { repos } from "$lib/stores/repo.svelte";
 	import { graphSelection } from "$lib/stores/graphSelection.svelte";
 	import { graphNav } from "$lib/stores/graphNav.svelte";
+	import { branchEdit } from "$lib/stores/branchEdit.svelte";
+	import { appSettings } from "$lib/stores/appSettings.svelte";
 	import { diffView } from "$lib/stores/diffView.svelte";
 	import { unstagedRows, stagedRows } from "$lib/status/sections";
 	import { isModEvent } from "$lib/platform";
@@ -44,17 +46,20 @@
 			});
 		}
 		if (currentBranch) {
-			rows.push({ section: "Actions", label: "Pull", hint: "⌘P", run: () => void actions.pull(repoId, "ff", currentBranch) });
+			rows.push({ section: "Actions", label: "Pull", hint: "⌘P", run: () => void actions.pull(repoId, appSettings.current.git.defaultPullMode, currentBranch) });
 			rows.push({ section: "Actions", label: "Push", hint: "⌘⇧P", run: () => void actions.push(repoId, false, currentBranch) });
 		}
 		rows.push({ section: "Actions", label: "Fetch all", run: () => void actions.fetchAll(repoId) });
 		rows.push({ section: "Actions", label: "Create branch…", hint: "⌘B", run: () => {
 			const sha = graph.head?.sha;
-			if (sha) graphNav.scrollTo(sha);
+			if (sha) {
+				graphNav.scrollTo(sha);
+				branchEdit.startCreate(sha);
+			}
 		} });
 		rows.push({ section: "Actions", label: "Stash all", hint: "⌘S", run: () => void actions.stashPush(repoId, {}) });
 		if (graph.stashes.length > 0) {
-			rows.push({ section: "Actions", label: "Pop latest stash", hint: "⌘⇧S", run: () => void actions.popStash(repoId, "stash@{0}", "") });
+			rows.push({ section: "Actions", label: "Pop latest stash", hint: "⌘⇧S", run: () => void actions.popStash(repoId, "stash@{0}") });
 		}
 		return rows;
 	}

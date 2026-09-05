@@ -4,13 +4,16 @@
 
 pub mod api;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 
 use crate::credentials;
 use crate::error::AppError;
+use crate::state::AppState;
 
 /// GitHub OAuth App client id — device flow needs no client secret, so shipping this in source is
 /// the normal, documented pattern (ARCHITECTURE.md §11). Jamie's registered OAuth App (Device Flow
@@ -90,7 +93,12 @@ pub async fn start_device_flow() -> Result<DeviceCode, AppError> {
         .error_for_status()?
         .json::<DeviceCodeApiResponse>()
         .await
-        .map_err(|e| AppError::new("GitHub sent back something BranchKit didn't understand", e.to_string()))?;
+        .map_err(|e| {
+            AppError::new(
+                "GitHub sent back something BranchKit didn't understand",
+                e.to_string(),
+            )
+        })?;
 
     Ok(DeviceCode {
         device_code: resp.device_code,
@@ -107,6 +115,7 @@ pub async fn start_device_flow() -> Result<DeviceCode, AppError> {
 #[tauri::command]
 pub async fn poll_device_flow(
     app: AppHandle,
+    state: State<'_, AppState>,
     device_code: String,
     interval: u32,
     expires_in: u32,
@@ -115,55 +124,107 @@ pub async fn poll_device_flow(
     let http = client();
     let mut interval = Duration::from_secs(interval.max(1) as u64);
     let deadline = std::time::Instant::now() + Duration::from_secs(expires_in as u64);
-
-    loop {
-        tokio::time::sleep(interval).await;
-        if std::time::Instant::now() > deadline {
-            return Err(AppError::new(
-                "That sign-in code expired — try again",
-                "device code expired",
-            ));
+    let cancelled = Arc::new(AtomicBool::new(false));
+    {
+        let mut active = state
+            .github_device_flow_cancel
+            .lock()
+            .expect("github device-flow mutex poisoned");
+        if let Some(previous) = active.replace(cancelled.clone()) {
+            previous.store(true, Ordering::SeqCst);
         }
+    }
 
-        let resp = http
-            .post(ACCESS_TOKEN_URL)
-            .header("Accept", "application/json")
-            .form(&[
-                ("client_id", client_id),
-                ("device_code", device_code.as_str()),
-                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-            ])
-            .send()
-            .await?
-            .json::<AccessTokenApiResponse>()
-            .await
-            .map_err(|e| AppError::new("GitHub sent back something BranchKit didn't understand", e.to_string()))?;
-
-        if let Some(token) = resp.access_token {
-            credentials::set_secret(credentials::GITHUB_ACCOUNT, &token)?;
-            let user = api::fetch_current_user(&token).await?;
-            save_cached_user(&app, Some(&user));
-            return Ok(user);
-        }
-
-        match resp.error.as_deref() {
-            Some("authorization_pending") => continue,
-            Some("slow_down") => {
-                interval = Duration::from_secs(resp.interval.unwrap_or(5).max(1) as u64);
+    let result = async {
+        loop {
+            tokio::time::sleep(interval).await;
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(AppError::new("Sign-in was cancelled", "cancelled locally"));
             }
-            Some("expired_token") => {
-                return Err(AppError::new("That sign-in code expired — try again", "expired_token"));
-            }
-            Some("access_denied") => {
-                return Err(AppError::new("Sign-in was cancelled", "access_denied"));
-            }
-            other => {
+            if std::time::Instant::now() > deadline {
                 return Err(AppError::new(
-                    "GitHub sign-in failed",
-                    other.unwrap_or("unknown device flow error").to_string(),
+                    "That sign-in code expired — try again",
+                    "device code expired",
                 ));
             }
+
+            let resp = http
+                .post(ACCESS_TOKEN_URL)
+                .header("Accept", "application/json")
+                .form(&[
+                    ("client_id", client_id),
+                    ("device_code", device_code.as_str()),
+                    ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+                ])
+                .send()
+                .await?
+                .json::<AccessTokenApiResponse>()
+                .await
+                .map_err(|e| {
+                    AppError::new(
+                        "GitHub sent back something BranchKit didn't understand",
+                        e.to_string(),
+                    )
+                })?;
+
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(AppError::new("Sign-in was cancelled", "cancelled locally"));
+            }
+
+            if let Some(token) = resp.access_token {
+                credentials::set_secret(credentials::GITHUB_ACCOUNT, &token)?;
+                let user = api::fetch_current_user(&token).await?;
+                save_cached_user(&app, Some(&user));
+                return Ok(user);
+            }
+
+            match resp.error.as_deref() {
+                Some("authorization_pending") => continue,
+                Some("slow_down") => {
+                    interval = Duration::from_secs(resp.interval.unwrap_or(5).max(1) as u64);
+                }
+                Some("expired_token") => {
+                    return Err(AppError::new(
+                        "That sign-in code expired — try again",
+                        "expired_token",
+                    ));
+                }
+                Some("access_denied") => {
+                    return Err(AppError::new("Sign-in was cancelled", "access_denied"));
+                }
+                other => {
+                    return Err(AppError::new(
+                        "GitHub sign-in failed",
+                        other.unwrap_or("unknown device flow error").to_string(),
+                    ));
+                }
+            }
         }
+    }
+    .await;
+
+    let mut active = state
+        .github_device_flow_cancel
+        .lock()
+        .expect("github device-flow mutex poisoned");
+    if active
+        .as_ref()
+        .is_some_and(|current| Arc::ptr_eq(current, &cancelled))
+    {
+        *active = None;
+    }
+    result
+}
+
+#[tauri::command]
+pub fn cancel_device_flow(state: State<'_, AppState>) {
+    if let Some(cancelled) = state
+        .github_device_flow_cancel
+        .lock()
+        .expect("github device-flow mutex poisoned")
+        .take()
+    {
+        cancelled.store(true, Ordering::SeqCst);
     }
 }
 
@@ -175,7 +236,9 @@ fn cached_user_path(app: &AppHandle) -> Option<std::path::PathBuf> {
 }
 
 fn save_cached_user(app: &AppHandle, user: Option<&GithubUser>) {
-    let Some(path) = cached_user_path(app) else { return };
+    let Some(path) = cached_user_path(app) else {
+        return;
+    };
     match user {
         Some(u) => {
             if let Ok(text) = serde_json::to_string(u) {

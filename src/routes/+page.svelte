@@ -42,10 +42,12 @@
   import { createPrDraft } from "$lib/stores/createPrDraft.svelte";
   import * as actions from "$lib/actions";
   import { credentialStorageStatus } from "$lib/ipc";
+  import { toasts } from "$lib/stores/toasts.svelte";
 
   let showPicker = $state(false);
   let showClone = $state(false);
   let credentialWarning = $state<string | null>(null);
+  let sessionRestoreStarted = false;
 
   // Settings + GitHub connection are app-wide, not per-repo — load once at startup.
   $effect(() => {
@@ -56,6 +58,24 @@
       (status) => (credentialWarning = status.warning),
       () => (credentialWarning = null),
     );
+  });
+
+  $effect(() => {
+    if (
+      sessionRestoreStarted ||
+      !onboarding.done ||
+      !appSettings.loaded ||
+      !appSettings.current.general.openLastReposOnLaunch
+    ) return;
+    sessionRestoreStarted = true;
+    void repos.restoreLastSession().then((failures) => {
+      if (failures.length > 0) {
+        toasts.pushError(
+          `Couldn't reopen ${failures.length} saved ${failures.length === 1 ? "repository" : "repositories"}`,
+          failures.join("\n"),
+        );
+      }
+    });
   });
 
   // ARCHITECTURE.md §9/§14: once offline, retry a fetch as soon as the window regains focus
@@ -77,7 +97,7 @@
     if (id && !id.startsWith("pending:")) {
       if (id !== openedGraphId) {
         openedGraphId = id;
-        graph.open(id).catch((e) => console.error(e));
+        graph.open(id, repos.active?.path ?? id).catch((e) => console.error(e));
         status.open(id).catch((e) => console.error(e));
         keepSession.open(id).catch((e) => console.error(e));
         diffView.close();
@@ -147,8 +167,8 @@
     try {
       await repos.open(path);
     } catch (e) {
-      // Routed through the shared error-toast surface once ARCHITECTURE §9 lands (prompt 10).
-      console.error(e);
+      const err = actions.asAppError(e);
+      toasts.pushError(err.userMessage, err.raw);
     }
   }
 
@@ -198,8 +218,13 @@
     } else if (key === "s") {
       if (id) {
         e.preventDefault();
-        if (e.shiftKey) void actions.popStash(id, "stash@{0}", "");
+        if (e.shiftKey) void actions.popStash(id, "stash@{0}");
         else void actions.stashPush(id, {});
+      }
+    } else if (key === "enter") {
+      if (id && commitDraft.canCommit && status.report.entries.length > 0) {
+        e.preventDefault();
+        void actions.commitPrimary(id);
       }
     } else if (key === ",") {
       // Cmd+, → Settings (§10 global map).

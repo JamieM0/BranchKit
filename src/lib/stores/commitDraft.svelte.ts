@@ -2,14 +2,11 @@
  *
  * Single source of truth for BOTH the right-panel commit composer (§7) AND the graph's WIP-row
  * inline editor (§4.2), so typing in one mirrors instantly in the other — components bind directly
- * to `summary`/`description`. It also owns the 72-char countdown state (§17), the amend draft
+ * to `summary`/`description`. It also owns the configurable summary countdown state (§7), the amend draft
  * backup that's restored on untick (§15.15) and the one-shot "move focus to the description"
  * signal (Enter from a summary field). */
 
 import { appSettings } from "./appSettings.svelte";
-
-/** Commit-summary guide length — DESIGN_SPEC.md §7/§13 (default 72, configurable in Settings → Git). */
-export const COMMIT_GUIDE = 72;
 
 /** Counter tint: `--text-faint` normally, `--warn` when close, `--danger` once past the guide. */
 export type CounterState = "normal" | "warn" | "danger";

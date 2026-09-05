@@ -22,6 +22,28 @@ const mainRef: RefInfo = {
 	isHead: true,
 };
 
+function remoteMain(sha: string): RefInfo {
+	return {
+		name: "refs/remotes/origin/main",
+		shortName: "origin/main",
+		kind: "remoteBranch",
+		sha,
+		upstream: null,
+		ahead: 0,
+		behind: 0,
+		gone: false,
+		isHead: false,
+	};
+}
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
+}
+
 function deps(overrides: Partial<GraphStoreDeps> = {}): GraphStoreDeps {
 	return {
 		getGraph: vi.fn(async () => topology),
@@ -49,5 +71,48 @@ describe("GraphStore", () => {
 		expect(storeDeps.getGraph).toHaveBeenCalledTimes(1);
 		expect(storeDeps.assignLanes).toHaveBeenCalledTimes(1);
 		expect(store.laneComputeCount).toBe(1);
+	});
+
+	it("does not let an older refs read restore a stale remote-only pill", async () => {
+		const oldRead = deferred<{ refs: RefInfo[]; head: HeadInfo }>();
+		const freshRead = deferred<{ refs: RefInfo[]; head: HeadInfo }>();
+		const trackingMain = { ...mainRef, upstream: "origin/main" };
+		const storeDeps = deps({
+			getRefs: vi
+				.fn()
+				.mockResolvedValueOnce({ refs: [trackingMain, remoteMain("B")], head })
+				.mockReturnValueOnce(oldRead.promise)
+				.mockReturnValueOnce(freshRead.promise),
+		});
+		const store = new GraphStore(storeDeps);
+		await store.open("repo-1");
+
+		const olderRefresh = store.refreshRefs();
+		const newerRefresh = store.refreshRefs();
+		freshRead.resolve({ refs: [trackingMain, remoteMain("B")], head });
+		await newerRefresh;
+		oldRead.resolve({ refs: [trackingMain, remoteMain("A")], head });
+		await olderRefresh;
+
+		expect(store.pillsBySha["B"]).toHaveLength(1);
+		expect(store.pillsBySha["B"][0]).toMatchObject({ name: "main", local: true, remote: true });
+		expect(store.pillsBySha["A"]).toBeUndefined();
+	});
+
+	it("reloads topology with the hidden local branch and its upstream excluded", async () => {
+		const trackingMain = { ...mainRef, upstream: "origin/main" };
+		const storeDeps = deps({
+			getRefs: vi.fn(async () => ({ refs: [trackingMain, remoteMain("A")], head })),
+		});
+		const store = new GraphStore(storeDeps);
+		await store.open("repo-1");
+		vi.mocked(storeDeps.getGraph).mockClear();
+
+		await store.toggleHiddenBranch("main");
+
+		expect(storeDeps.getGraph).toHaveBeenCalledWith("repo-1", [
+			"refs/heads/main",
+			"refs/remotes/origin/main",
+		]);
 	});
 });
