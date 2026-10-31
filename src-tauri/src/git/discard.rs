@@ -149,7 +149,7 @@ async fn write_trash(
     if let Some(patch) = patch_override {
         std::fs::write(entry_dir.join("changes.patch"), patch)?;
     } else if !tracked.is_empty() {
-        let mut args = vec!["diff", "--no-color", "--"];
+        let mut args = vec!["diff", "--binary", "--no-color", "--"];
         args.extend(tracked.iter().map(|s| s.as_str()));
         let output = git(repo, &args, GitOpts::default())
             .await
@@ -161,7 +161,8 @@ async fn write_trash(
 
     for p in &untracked {
         let src = repo.join(p);
-        if let Ok(bytes) = std::fs::read(&src) {
+        {
+            let bytes = std::fs::read(&src)?;
             let dest = entry_dir.join("untracked").join(p);
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -340,7 +341,7 @@ pub async fn discard_all(
     let patch_override = if tracked_paths.is_empty() {
         None
     } else {
-        let mut args = vec!["diff", "--no-color", "HEAD", "--"];
+        let mut args = vec!["diff", "--binary", "--no-color", "HEAD", "--"];
         args.extend(tracked_paths.iter().map(|s| s.as_str()));
         let output = git(&handle.path, &args, GitOpts::default()).await?;
         if output.stdout.is_empty() {
@@ -626,6 +627,23 @@ mod tests {
     }
 
     /// Discard→Undo round trip for a modified tracked file: content must come back byte-identical.
+    #[tokio::test]
+    async fn binary_discard_restores_exact_bytes() {
+        let repo = tempfile::tempdir().unwrap();
+        init_repo(repo.path()).await;
+        std::fs::write(repo.path().join("image.bin"), b"old\0bytes").unwrap();
+        git(repo.path(), &["add", "-A"], GitOpts::default()).await.unwrap();
+        git(repo.path(), &["commit", "-m", "base"], GitOpts::default()).await.unwrap();
+        let changed = b"new\0binary\xff";
+        std::fs::write(repo.path().join("image.bin"), changed).unwrap();
+        let trash = tempfile::tempdir().unwrap();
+        let paths = vec!["image.bin".to_string()];
+        let entry = write_trash(trash.path(), repo.path(), &paths, "binary discard", None).await.unwrap();
+        discard_paths(repo.path(), &paths).await.unwrap();
+        restore_entry(trash.path(), repo.path(), &entry.id).await.unwrap();
+        assert_eq!(std::fs::read(repo.path().join("image.bin")).unwrap(), changed);
+    }
+
     #[tokio::test]
     async fn discard_file_then_restore_is_byte_identical_for_a_tracked_file() {
         let repo = tempfile::tempdir().unwrap();

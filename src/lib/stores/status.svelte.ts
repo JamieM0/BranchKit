@@ -22,43 +22,60 @@ export class StatusStore {
 	repoId: string | null = $state(null);
 	report: StatusReport = $state(EMPTY_REPORT);
 	loading = $state(false);
+	error: unknown = $state(null);
 
 	#deps: StatusStoreDeps;
 	#unlisten: UnlistenFn | null = null;
+	#session = 0;
+	#request = 0;
 
 	constructor(deps: Partial<StatusStoreDeps> = {}) {
 		this.#deps = { ...defaultDeps, ...deps };
 	}
 
 	async open(repoId: string): Promise<void> {
-		await this.close();
+		void this.close();
+		const session = this.#session;
 		this.repoId = repoId;
 		this.loading = true;
-		this.#unlisten = await this.#deps.onRepoChanged(repoId, (kind) => {
-			if (kind.kind === "workingTree" || kind.kind === "index" || kind.kind === "head") {
+		const unlisten = await this.#deps.onRepoChanged(repoId, (kind) => {
+			if (session !== this.#session) return;
+			if (["workingTree", "index", "head", "refs", "remote"].includes(kind.kind)) {
 				void this.refresh();
 			}
 		});
-		try {
-			await this.refresh();
-		} finally {
-			this.loading = false;
-		}
+		if (session !== this.#session) { unlisten(); return; }
+		this.#unlisten = unlisten;
+		await this.refresh();
 	}
 
 	async close(): Promise<void> {
-		if (this.#unlisten) {
-			await this.#unlisten();
-			this.#unlisten = null;
-		}
+		this.#session += 1;
+		this.#request += 1;
+		this.#unlisten?.();
+		this.#unlisten = null;
 		this.repoId = null;
 		this.report = EMPTY_REPORT;
+		this.loading = false;
+		this.error = null;
 	}
 
 	async refresh(): Promise<void> {
-		if (!this.repoId) return;
-		this.report = await this.#deps.getStatus(this.repoId);
+		const repoId = this.repoId;
+		if (!repoId) return;
+		const request = ++this.#request;
+		try {
+			const report = await this.#deps.getStatus(repoId);
+			if (request !== this.#request) return;
+			this.report = report;
+			this.error = null;
+		} catch (error) {
+			if (request === this.#request) this.error = error;
+		} finally {
+			if (request === this.#request) this.loading = false;
+		}
 	}
+
 }
 
 export const status = new StatusStore();

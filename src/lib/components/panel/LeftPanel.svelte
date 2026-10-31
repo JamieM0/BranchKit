@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PanelResizeHandle from "$lib/components/shell/PanelResizeHandle.svelte";
 	import { tick } from "svelte";
 	// phosphor-svelte: icon set requested by Jamie (replaces emoji glyphs).
 	import {
@@ -273,7 +274,8 @@
 	}
 </script>
 
-<aside class="panel" class:collapsed={settings.leftPanelCollapsed}>
+<aside class="panel" class:collapsed={settings.leftPanelCollapsed} style:--panel-width={`${settings.leftPanelWidth}px`}>
+	{#if !settings.leftPanelCollapsed}<PanelResizeHandle side="left" value={settings.leftPanelWidth} onChange={(value) => settings.setPanelWidth("left", value)} onReset={() => settings.resetPanelWidth("left")} />{/if}
 	{#if settings.leftPanelCollapsed}
 		<div class="rail">
 			<button type="button" class="rail-btn" title="Expand panel" onclick={() => settings.toggleLeftPanel()}>›</button>
@@ -575,8 +577,10 @@
 	.panel {
 		display: flex;
 		flex-direction: column;
-		width: 240px;
-		min-width: 240px;
+		width: min(var(--panel-width), 32vw);
+		min-width: 220px;
+		flex-shrink: 0;
+		position: relative;
 		height: 100%;
 		background: var(--surface);
 		border-right: 1px solid var(--border);

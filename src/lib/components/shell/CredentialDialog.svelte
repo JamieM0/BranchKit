@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { modal } from "$lib/modal";
 	import { credentialDialog } from "$lib/stores/credentialDialog.svelte";
 	import { focusOnMount } from "$lib/focus";
 	import { toasts } from "$lib/stores/toasts.svelte";
@@ -50,7 +51,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 	<div class="scrim" onclick={() => credentialDialog.dismiss()} onkeydown={handleKeydown} role="presentation">
 		<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-		<div class="dialog" role="dialog" aria-modal="true" aria-label="Sign in to {credentialDialog.state.host}" tabindex="-1" onclick={(e) => e.stopPropagation()}>
+		<div class="dialog" role="dialog" use:modal aria-modal="true" aria-label="Sign in to {credentialDialog.state.host}" tabindex="-1" onclick={(e) => e.stopPropagation()}>
 			<h2>Sign in to {credentialDialog.state.host}</h2>
 			<p class="hint">Saved to your OS keychain — BranchKit never stores this in a plain file.</p>
 
@@ -83,7 +84,7 @@
 	.scrim {
 		position: fixed;
 		inset: 0;
-		background: rgb(0 0 0 / 40%);
+		background: var(--scrim);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -98,7 +99,7 @@
 		background: var(--overlay);
 		border: 1px solid var(--border);
 		border-radius: var(--radius-card);
-		box-shadow: 0 16px 48px rgb(0 0 0 / 35%);
+		box-shadow: 0 16px 48px var(--shadow-color);
 		padding: var(--space-5);
 	}
 

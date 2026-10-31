@@ -28,6 +28,9 @@
       name = identity.name ?? "";
       email = identity.email ?? "";
       checking = false;
+    }).catch(() => {
+      checking = false;
+      errorMessage = "Couldn't read your Git identity. You can retry by entering it here, or skip this step.";
     });
   });
 

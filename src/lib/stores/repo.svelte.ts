@@ -1,5 +1,5 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { cloneRepo, closeRepo, onCloneProgress, onRepoChanged, openRepo } from "$lib/ipc";
+import { getRefs, cloneRepo, closeRepo, onCloneProgress, onRepoChanged, openRepo } from "$lib/ipc";
 import type { ChangeKind, RepoInfo } from "$lib/types";
 
 /** Fine-grained invalidation flags a repo's tab accumulates from `repo://{id}/changed` events —
@@ -95,10 +95,19 @@ class RepoStore {
 	}
 
 	async #subscribe(id: string) {
+		let headRequest = 0;
 		const unlisten = await onRepoChanged(id, (kind) => {
 			const i = this.#tabIndex(id);
 			if (i === -1) return;
 			this.tabs[i].invalidate = applyChangeKind(this.tabs[i].invalidate, kind);
+			if (kind.kind === "head" || kind.kind === "refs") {
+				const request = ++headRequest;
+				void getRefs(id).then(({ head }) => {
+					if (request !== headRequest) return;
+					const tab = this.tabs.find((tab) => tab.id === id);
+					if (tab) { tab.branch = head.branch; tab.detached = head.detached; }
+				}).catch(() => {});
+			}
 		});
 		this.#unlisten.set(id, unlisten);
 	}

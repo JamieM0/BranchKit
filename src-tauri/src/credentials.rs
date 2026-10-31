@@ -13,11 +13,87 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, Once, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use zeroize::Zeroizing;
 
 const SERVICE: &str = "BranchKit";
 pub const GITHUB_ACCOUNT: &str = "github-oauth";
 pub const AI_API_KEY_ACCOUNT: &str = "ai-api-key";
+
+static STORAGE_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+mod noninteractive_keychain {
+    use std::sync::Mutex;
+
+    // Security.framework is already linked by the macOS keyring backend. Use its existing C
+    // API rather than adding a dependency solely to control password dialogs.
+    #[link(name = "Security", kind = "framework")]
+    extern "C" {
+        fn SecKeychainGetUserInteractionAllowed(state: *mut u8) -> i32;
+        fn SecKeychainSetUserInteractionAllowed(state: u8) -> i32;
+    }
+
+    static ACCESS: Mutex<()> = Mutex::new(());
+    struct RestoreInteraction(u8);
+    impl Drop for RestoreInteraction {
+        fn drop(&mut self) {
+            // SAFETY: restores the process's previous setting; the ACCESS guard is still held.
+            unsafe { SecKeychainSetUserInteractionAllowed(self.0); }
+        }
+    }
+
+    pub fn run<T>(operation: impl FnOnce() -> keyring::Result<T>) -> keyring::Result<T> {
+        let _lock = ACCESS.lock().unwrap_or_else(|error| error.into_inner());
+        let mut previous = 0;
+        // SAFETY: the output pointer is valid; access is serialized because this setting is
+        // process-wide. A denied Keychain request fails without asking for the login password.
+        let status = unsafe { SecKeychainGetUserInteractionAllowed(&mut previous) };
+        if status != 0 { return Err(failure(status)); }
+        let status = unsafe { SecKeychainSetUserInteractionAllowed(0) };
+        if status != 0 { return Err(failure(status)); }
+        let _restore = RestoreInteraction(previous);
+        operation()
+    }
+
+    fn failure(status: i32) -> keyring::Error {
+        keyring::Error::NoStorageAccess(Box::new(std::io::Error::other(format!("Keychain interaction control failed ({status})"))))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        #[test]
+        fn keychain_calls_disable_dialogs_and_restore_the_previous_setting() {
+            let mut before = 0;
+            assert_eq!(unsafe { SecKeychainGetUserInteractionAllowed(&mut before) }, 0);
+            run(|| {
+                let mut during = 1;
+                assert_eq!(unsafe { SecKeychainGetUserInteractionAllowed(&mut during) }, 0);
+                assert_eq!(during, 0);
+                Err::<(), _>(keyring::Error::NoEntry)
+            }).unwrap_err();
+            let mut after = 0;
+            assert_eq!(unsafe { SecKeychainGetUserInteractionAllowed(&mut after) }, 0);
+            assert_eq!(after, before);
+        }
+    }
+}
+
+// SPEC-DEVIATION (ARCHITECTURE.md §8): credential access never opens an OS password dialog.
+// Locked or unauthorized entries use the existing session fallback and a visible warning.
+fn with_keychain<T>(operation: impl FnOnce() -> keyring::Result<T>) -> keyring::Result<T> {
+    #[cfg(target_os = "macos")]
+    let result = noninteractive_keychain::run(operation);
+    #[cfg(not(target_os = "macos"))]
+    let result = operation();
+    if let Err(error) = &result {
+        if !matches!(error, keyring::Error::NoEntry) {
+            STORAGE_UNAVAILABLE.store(true, Ordering::Relaxed);
+        }
+    }
+    result
+}
 
 fn account_for(host: &str, username: &str) -> String {
     format!("{host}:{username}")
@@ -57,7 +133,10 @@ fn entry(account: &str) -> Result<Entry, keyring::Error> {
 /// without libsecret degrades to in-memory-only secrets) — a miss here is an expected case for
 /// every caller, never a hard failure.
 pub fn get_secret(account: &str) -> Option<Zeroizing<String>> {
-    if let Ok(secret) = entry(account).and_then(|e| e.get_password()) {
+    if let Some(secret) = memory_secrets().lock().ok()?.get(account) {
+        return Some(Zeroizing::new(secret.as_str().to_owned()));
+    }
+    if let Ok(secret) = with_keychain(|| entry(account).and_then(|e| e.get_password())) {
         return Some(Zeroizing::new(secret));
     }
     memory_secrets()
@@ -68,7 +147,7 @@ pub fn get_secret(account: &str) -> Option<Zeroizing<String>> {
 }
 
 pub fn set_secret(account: &str, secret: &str) -> Result<(), keyring::Error> {
-    match entry(account).and_then(|e| e.set_password(secret)) {
+    match with_keychain(|| entry(account).and_then(|e| e.set_password(secret))) {
         Ok(()) => {
             if let Ok(mut memory) = memory_secrets().lock() {
                 memory.remove(account);
@@ -92,9 +171,7 @@ pub fn delete_secret(account: &str) {
         memory.remove(account);
     }
     // Best-effort: erasing something already absent isn't an error worth surfacing.
-    if let Ok(e) = entry(account) {
-        let _ = e.delete_credential();
-    }
+    let _ = with_keychain(|| entry(account).and_then(|e| e.delete_credential()));
 }
 
 fn credential_storage_persistent() -> bool {
@@ -102,7 +179,7 @@ fn credential_storage_persistent() -> bool {
         return false;
     };
     matches!(
-        probe.get_password(),
+        with_keychain(|| probe.get_password()),
         Ok(_) | Err(keyring::Error::NoEntry)
     )
 }
@@ -118,11 +195,11 @@ pub struct CredentialStorageStatus {
 /// implying that a session-only credential was saved persistently.
 #[tauri::command]
 pub fn credential_storage_status() -> CredentialStorageStatus {
-    let persistent = credential_storage_persistent();
+    let persistent = credential_storage_persistent() && !STORAGE_UNAVAILABLE.load(Ordering::Relaxed);
     CredentialStorageStatus {
         persistent,
         warning: (!persistent).then(|| {
-            "Secure credential storage is unavailable — secrets will be kept in memory for this session only."
+            "Secure credential storage is unavailable or locked. BranchKit will not ask for your Keychain password. Reconnect integrations for this session, or unlock Keychain outside BranchKit."
                 .to_string()
         }),
     }

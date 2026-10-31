@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { X, Plus } from "phosphor-svelte";
   import { repos, type RepoTab } from "$lib/stores/repo.svelte";
 
   let { onPick }: { onPick: () => void } = $props();
@@ -29,6 +30,20 @@
     dragOverIndex = null;
   }
 
+  function onTabKeydown(e: KeyboardEvent, index: number) {
+    // Close buttons own their Enter/Space presses; they must never activate the enclosing tab.
+    if (e.target !== e.currentTarget) return;
+    let next = index;
+    if (e.key === "ArrowRight") next = (index + 1) % repos.tabs.length;
+    else if (e.key === "ArrowLeft") next = (index - 1 + repos.tabs.length) % repos.tabs.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = repos.tabs.length - 1;
+    else if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    repos.switchTo(repos.tabs[next].id);
+    (e.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus();
+  }
+
   function onMiddleClick(e: MouseEvent, tab: RepoTab) {
     if (e.button !== 1) return;
     e.preventDefault();
@@ -45,19 +60,15 @@
   {#each repos.tabs as tab, index (tab.id)}
     <div
       role="tab"
-      tabindex="0"
+      tabindex={repos.activeId === tab.id ? 0 : -1}
       aria-selected={repos.activeId === tab.id}
+      title={`${tab.path}${tab.branch ? ` · ${tab.branch}` : ""}`}
       class="tab"
       class:active={repos.activeId === tab.id}
       class:drag-over={dragOverIndex === index && dragIndex !== index}
       draggable={!tab.cloneProgress}
       onclick={() => repos.switchTo(tab.id)}
-      onkeydown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          repos.switchTo(tab.id);
-        }
-      }}
+      onkeydown={(e) => onTabKeydown(e, index)}
       onmousedown={(e) => onMiddleClick(e, tab)}
       ondragstart={(e) => onDragStart(e, index)}
       ondragover={(e) => onDragOver(e, index)}
@@ -86,15 +97,17 @@
           type="button"
           class="close"
           aria-label="Close {tab.name}"
+          title="Close repository tab"
+          onkeydown={(e) => e.stopPropagation()}
           onclick={(e) => onClose(e, tab)}
         >
-          ✕
+          <X size={12} aria-hidden="true" />
         </button>
       {/if}
     </div>
   {/each}
-  <button type="button" class="new-tab" onclick={onPick} aria-label="Open or clone a repository (⌘T)">
-    +
+  <button type="button" class="new-tab" onclick={onPick} title="Open or clone a repository" aria-label="Open or clone a repository">
+    <Plus size={16} aria-hidden="true" />
   </button>
 </div>
 
@@ -121,6 +134,7 @@
     cursor: pointer;
     font: inherit;
     white-space: nowrap;
+    flex-shrink: 0;
     transition: background var(--motion-hover), color var(--motion-hover);
   }
 
@@ -193,8 +207,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 16px;
-    height: 16px;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
     border-radius: var(--radius-control);
     font-size: 10px;
     color: var(--text-faint);
@@ -202,7 +218,9 @@
     transition: opacity var(--motion-hover), background var(--motion-hover);
   }
 
-  .tab:hover .close {
+  .tab:hover .close,
+  .tab:focus-within .close,
+  .tab.active .close {
     opacity: 1;
   }
 
@@ -216,6 +234,8 @@
     align-items: center;
     justify-content: center;
     width: 32px;
+    min-height: 28px;
+    flex-shrink: 0;
     align-self: center;
     background: transparent;
     border: none;

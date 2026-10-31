@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ClockCounterClockwise, Trash } from "phosphor-svelte";
 	import { status } from "$lib/stores/status.svelte";
 	import { graph } from "$lib/stores/graph.svelte";
 	import { repos } from "$lib/stores/repo.svelte";
@@ -246,6 +247,16 @@
 	}
 </script>
 
+{#if status.error}
+	<div role="alert">
+		<p>Couldn't read repository status. The file list may be out of date.</p>
+		<button type="button" onclick={() => status.refresh()}>Retry status</button>
+	</div>
+{:else if status.loading}
+	<p role="status">Reading repository status…</p>
+{/if}
+
+
 <div class="panel" tabindex="0" role="listbox" aria-label="Working directory changes" onkeydown={onKeydown}>
 	<div class="header">
 		<div class="title">
@@ -260,7 +271,7 @@
 				aria-label="Recently discarded"
 				onclick={() => void toggleRecentlyDiscarded()}
 			>
-				🕒
+				<ClockCounterClockwise size={14} aria-hidden="true" />
 			</button>
 			<button
 				type="button"
@@ -269,7 +280,7 @@
 				title="Discard every change — recoverable from Recently Discarded"
 				onclick={requestDiscardAll}
 			>
-				🗑 Discard All
+				<Trash size={13} aria-hidden="true" /> Discard All
 			</button>
 			<div class="view-toggle" role="group" aria-label="File list view">
 				<button
@@ -324,6 +335,9 @@
 	{/if}
 
 	<div class="sections">
+		{#if !status.loading && !status.error && totalChanged === 0}
+			<p class="empty" role="status">Working tree clean ✓</p>
+		{/if}
 		<ConflictedFilesSection />
 		<section>
 			<div class="section-head">
@@ -420,6 +434,7 @@
 	}
 
 	.header {
+		flex-wrap: wrap;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -429,6 +444,8 @@
 	}
 
 	.title {
+		min-width: 0;
+		overflow-wrap: anywhere;
 		font-size: 12px;
 		color: var(--text-muted);
 	}
@@ -446,6 +463,9 @@
 	}
 
 	.discard-all {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-1);
 		border: 1px solid var(--border);
 		border-radius: var(--radius-control);
 		background: var(--raised);
@@ -466,6 +486,9 @@
 	}
 
 	.recently-discarded {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-control);
 		background: var(--raised);

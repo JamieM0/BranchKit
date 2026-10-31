@@ -92,7 +92,13 @@ pub struct StatusReport {
 pub async fn status(repo: &Path) -> Result<StatusReport, GitError> {
     let output = git(
         repo,
-        &["status", "--porcelain=v2", "--branch", "-z"],
+        &[
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--untracked-files=all",
+            "-z",
+        ],
         GitOpts::default(),
     )
     .await?;
@@ -102,7 +108,10 @@ pub async fn status(repo: &Path) -> Result<StatusReport, GitError> {
 /// Working-directory panel's status feed — DESIGN_SPEC.md §6.1. Re-fetched on `WorkingTree`,
 /// `Index` and `Head` refresh events (a checkout changes the branch name in the header too).
 #[tauri::command]
-pub async fn get_status(state: State<'_, AppState>, repo_id: String) -> Result<StatusReport, AppError> {
+pub async fn get_status(
+    state: State<'_, AppState>,
+    repo_id: String,
+) -> Result<StatusReport, AppError> {
     let handle = require_repo(&state, &repo_id)?;
     Ok(status(&handle.path).await?)
 }
@@ -110,7 +119,7 @@ pub async fn get_status(state: State<'_, AppState>, repo_id: String) -> Result<S
 fn parse_branch_header(report: &mut BranchStatus, header: &str) {
     // header is the text after "# ", e.g. "branch.oid <sha>" / "branch.ab +1 -2"
     if let Some(oid) = header.strip_prefix("branch.oid ") {
-        report.oid = Some(oid.trim().to_string());
+        report.oid = (oid.trim() != "(initial)").then(|| oid.trim().to_string());
     } else if let Some(head) = header.strip_prefix("branch.head ") {
         let head = head.trim();
         report.head = if head == "(detached)" {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { modal } from "$lib/modal";
 	import { pickFolder } from "$lib/ipc";
 	import { repos } from "$lib/stores/repo.svelte";
 	import { graph } from "$lib/stores/graph.svelte";
@@ -64,7 +65,7 @@
 </script>
 
 <div class="scrim" onkeydown={handleKeydown} role="presentation">
-	<div class="dialog" role="dialog" aria-modal="true" aria-label="Create a worktree">
+	<div class="dialog" role="dialog" use:modal aria-modal="true" aria-label="Create a worktree">
 		<h2>Create a worktree</h2>
 
 		<label class="field">
@@ -112,7 +113,7 @@
 	.scrim {
 		position: fixed;
 		inset: 0;
-		background: rgb(0 0 0 / 40%);
+		background: var(--scrim);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -127,7 +128,7 @@
 		background: var(--overlay);
 		border: 1px solid var(--border);
 		border-radius: var(--radius-card);
-		box-shadow: 0 16px 48px rgb(0 0 0 / 35%);
+		box-shadow: 0 16px 48px var(--shadow-color);
 		padding: var(--space-5);
 	}
 

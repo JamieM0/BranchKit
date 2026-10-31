@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { X } from "phosphor-svelte";
   import CloneDialog from "$lib/components/shell/CloneDialog.svelte";
   import CreateWorktreeDialog from "$lib/components/shell/CreateWorktreeDialog.svelte";
   import EmptyState from "$lib/components/shell/EmptyState.svelte";
@@ -17,10 +18,12 @@
   import CommandPalette from "$lib/components/shell/CommandPalette.svelte";
   import CredentialDialog from "$lib/components/shell/CredentialDialog.svelte";
   import SettingsWindow from "$lib/components/settings/SettingsWindow.svelte";
+  import { credentialDialog } from "$lib/stores/credentialDialog.svelte";
   import { commandPalette } from "$lib/stores/commandPalette.svelte";
   import { isModEvent } from "$lib/platform";
   import { onboarding } from "$lib/stores/onboarding.svelte";
   import { repos } from "$lib/stores/repo.svelte";
+  import { graphSelection } from "$lib/stores/graphSelection.svelte";
   import { graph } from "$lib/stores/graph.svelte";
   import { status } from "$lib/stores/status.svelte";
   import { diffView } from "$lib/stores/diffView.svelte";
@@ -41,20 +44,54 @@
   import { prPanel } from "$lib/stores/prPanel.svelte";
   import { createPrDraft } from "$lib/stores/createPrDraft.svelte";
   import * as actions from "$lib/actions";
-  import { credentialStorageStatus } from "$lib/ipc";
+  import { onDesktopAction, pickFolder, setWindowContext, openInBrowser, checkGitAvailable, credentialStorageStatus } from "$lib/ipc";
   import { toasts } from "$lib/stores/toasts.svelte";
+
+  let gitReady = $state(false);
+  let gitError = $state<string | null>(null);
+  async function checkGit() {
+    gitError = null;
+    try { await checkGitAvailable(); gitReady = true; }
+    catch (error) { gitError = actions.asAppError(error).userMessage; }
+  }
+  $effect(() => { void checkGit(); });
 
   let showPicker = $state(false);
   let showClone = $state(false);
   let credentialWarning = $state<string | null>(null);
+  let credentialWarningDismissed = $state(false);
   let sessionRestoreStarted = false;
+
+  $effect(() => {
+    const tab = repos.active;
+    const context = tab ? `${tab.name}${tab.detached ? " · Detached HEAD" : tab.branch ? ` · ${tab.branch}` : ""} — BranchKit` : "BranchKit";
+    document.title = context;
+    void setWindowContext(context, !!tab && !tab.cloneProgress, showPicker || showClone || settingsWindow.open || commandPalette.isOpen || credentialDialog.state !== null || worktreeDialog.startRef !== null).catch(() => {});
+  });
+
+  $effect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void onDesktopAction((action) => {
+      if (action === "command_palette" && commandPalette.isOpen) { commandPalette.close(); return; }
+      // Native accelerators must respect modal ownership just like keyboard events do.
+      if (document.querySelector('[aria-modal="true"]')) return;
+      if (action === "settings") settingsWindow.show();
+      else if (action === "command_palette") commandPalette.toggle();
+      else if (action === "repo_picker") openPicker();
+      else if (action === "clone_repo") requestClone();
+      else if (action === "close_repo" && repos.activeId) void repos.close(repos.activeId);
+      else if (action === "open_repo") {
+        void pickFolder("Open Repository").then((path) => { if (path) void handleOpenPath(path); });
+      }
+    }).then((stop) => { if (disposed) stop(); else unlisten = stop; });
+    return () => { disposed = true; unlisten?.(); };
+  });
 
   // Settings + GitHub connection are app-wide, not per-repo — load once at startup.
   $effect(() => {
     void appSettings.load();
-    void github.checkConnection();
-    void ai.init();
-    void credentialStorageStatus().then(
+    void Promise.all([github.checkConnection(), ai.init()]).then(() => credentialStorageStatus()).then(
       (status) => (credentialWarning = status.warning),
       () => (credentialWarning = null),
     );
@@ -63,6 +100,7 @@
   $effect(() => {
     if (
       sessionRestoreStarted ||
+      !gitReady ||
       !onboarding.done ||
       !appSettings.loaded ||
       !appSettings.current.general.openLastReposOnLaunch
@@ -97,6 +135,7 @@
     if (id && !id.startsWith("pending:")) {
       if (id !== openedGraphId) {
         openedGraphId = id;
+        graphSelection.clear();
         graph.open(id, repos.active?.path ?? id).catch((e) => console.error(e));
         status.open(id).catch((e) => console.error(e));
         keepSession.open(id).catch((e) => console.error(e));
@@ -186,7 +225,7 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (!isModEvent(e)) return;
+    if (e.defaultPrevented || !isModEvent(e)) return;
     const key = e.key.toLowerCase();
     if (isEditableTarget(e) && key !== "k") return;
     const id = repos.activeId && !repos.activeId.startsWith("pending:") ? repos.activeId : null;
@@ -195,6 +234,10 @@
       // Cmd+K → command palette (§10 global map).
       e.preventDefault();
       commandPalette.toggle();
+    } else if (key === "o") {
+      e.preventDefault();
+      if (e.shiftKey) requestClone();
+      else void pickFolder("Open Repository").then((path) => { if (path) void handleOpenPath(path); });
     } else if (key === "t") {
       e.preventDefault();
       showPicker = true;
@@ -239,15 +282,30 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#if !onboarding.done}
+{#if !gitReady}
+  <main class="git-check">
+    <h1>{gitError ? "Git needs attention" : "Checking Git…"}</h1>
+    {#if gitError}
+      <p>{gitError}</p>
+      <p>BranchKit needs Git 2.30 or newer. Install Git, then retry.</p>
+      <p><button type="button" onclick={() => openInBrowser("https://git-scm.com/downloads")}>Install Git for macOS, Windows, or Linux</button></p>
+      <button type="button" onclick={checkGit}>Retry</button>
+    {/if}
+  </main>
+{:else if !onboarding.done}
   <FirstLaunch />
 {:else if repos.tabs.length === 0}
   <EmptyState onOpenPath={handleOpenPath} onRequestClone={requestClone} />
 {:else}
   <div class="shell">
     <RepoTabs onPick={openPicker} />
-    {#if credentialWarning}
-      <div class="credential-banner" role="status">{credentialWarning}</div>
+    {#if credentialWarning && !credentialWarningDismissed}
+      <div class="credential-banner" role="status">
+        <span>Saved credentials are unavailable.</span>
+        <button type="button" onclick={() => settingsWindow.show("credentials")}>Review credentials</button>
+        <details><summary>Details</summary><p>{credentialWarning}</p></details>
+        <button type="button" class="dismiss-warning" title="Dismiss for this session" aria-label="Dismiss credential warning" onclick={() => { credentialWarningDismissed = true; }}><X size={13} aria-hidden="true" /></button>
+      </div>
     {/if}
     {#if network.offline}
       <div class="offline-banner" role="status">
@@ -284,7 +342,7 @@
 {/if}
 
 <ToastStack />
-<CommandPalette />
+<CommandPalette onOpen={openPicker} onClone={requestClone} />
 <CredentialDialog />
 <SettingsWindow />
 
@@ -301,6 +359,15 @@
 {/if}
 
 <style>
+  .git-check {
+    height: 100vh;
+    display: grid;
+    place-content: center;
+    gap: var(--space-3);
+    color: var(--text);
+    background: var(--bg);
+  }
+
   .shell {
     height: 100vh;
     display: flex;
@@ -330,10 +397,39 @@
   }
 
   .credential-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    position: relative;
+    flex-shrink: 0;
     padding: var(--space-1) var(--space-3);
     font-size: 12px;
     color: var(--warn);
     background: color-mix(in srgb, var(--warn) 12%, var(--surface));
     border-bottom: 1px solid var(--border);
   }
+  .credential-banner button, .credential-banner summary {
+    color: var(--warn);
+    background: transparent;
+    border: none;
+    font: inherit;
+    cursor: pointer;
+    padding: 2px 0;
+  }
+  .credential-banner button:hover { text-decoration: underline; }
+  .credential-banner details p {
+    position: absolute;
+    top: 100%;
+    left: var(--space-3);
+    max-width: min(480px, 90vw);
+    margin: var(--space-1) 0;
+    padding: var(--space-3);
+    color: var(--text);
+    background: var(--overlay);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    box-shadow: 0 4px 16px var(--shadow-color);
+    z-index: 60;
+  }
+  .credential-banner .dismiss-warning { margin-left: auto; display: grid; place-items: center; min-width: 24px; min-height: 24px; }
 </style>

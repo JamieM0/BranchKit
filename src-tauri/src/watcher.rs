@@ -63,16 +63,25 @@ impl Drop for RepoWatcher {
     }
 }
 
-async fn resolve_git_dir(repo_path: &Path) -> Result<PathBuf, GitError> {
+async fn resolve_git_dirs(repo_path: &Path) -> Result<(PathBuf, PathBuf), GitError> {
     let output = git(
         repo_path,
         &["rev-parse", "--absolute-git-dir"],
         GitOpts::default(),
     )
     .await?;
-    Ok(PathBuf::from(
-        String::from_utf8_lossy(&output.stdout).trim().to_string(),
-    ))
+    let git_dir = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_string());
+    let output = git(
+        repo_path,
+        &["rev-parse", "--git-common-dir"],
+        GitOpts::default(),
+    )
+    .await?;
+    let common_dir = repo_path
+        .join(String::from_utf8_lossy(&output.stdout).trim())
+        .canonicalize()
+        .unwrap_or_else(|_| git_dir.clone());
+    Ok((git_dir, common_dir))
 }
 
 /// Classifies one changed path, or `None` if it's noise we never want to refresh for (loose
@@ -88,6 +97,9 @@ fn classify(git_dir: &Path, worktree_root: &Path, path: &Path) -> Option<Watched
             return None;
         }
         let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+        if file_name.ends_with(".lock") {
+            return None;
+        }
         return match file_name {
             "HEAD" | "MERGE_HEAD" | "REBASE_HEAD" | "CHERRY_PICK_HEAD" | "REVERT_HEAD" => {
                 Some(WatchedKind::Head)
@@ -111,14 +123,17 @@ fn classify(git_dir: &Path, worktree_root: &Path, path: &Path) -> Option<Watched
 }
 
 pub async fn start(app: AppHandle, handle: Arc<RepoHandle>) -> Result<RepoWatcher, WatcherError> {
-    let git_dir = resolve_git_dir(&handle.path).await?;
+    let (git_dir, common_dir) = resolve_git_dirs(&handle.path).await?;
     let worktree_root = handle.path.clone();
 
     let (raw_tx, raw_rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
     let mut watcher = notify::recommended_watcher(move |res| {
         let _ = raw_tx.send(res);
     })?;
-    watcher.watch(&git_dir, RecursiveMode::Recursive)?;
+    watcher.watch(&common_dir, RecursiveMode::Recursive)?;
+    if git_dir != common_dir && !git_dir.starts_with(&common_dir) {
+        watcher.watch(&git_dir, RecursiveMode::Recursive)?;
+    }
     watcher.watch(&worktree_root, RecursiveMode::Recursive)?;
 
     // notify's callback fires on its own thread and is sync; bridge it into a tokio channel with
@@ -149,11 +164,13 @@ pub async fn start(app: AppHandle, handle: Arc<RepoHandle>) -> Result<RepoWatche
                     let Some(path) = maybe_path else { break };
                     raw_count += 1;
                     if raw_count <= STORM_THRESHOLD {
-                        if let Some(kind) = classify(&git_dir, &worktree_root, &path) {
+                        let scope = if path.starts_with(&git_dir) { &git_dir } else { &common_dir };
+                        if let Some(kind) = classify(scope, &worktree_root, &path) {
                             pending.insert(kind);
                         }
                     } else {
-                        pending.insert(WatchedKind::WorkingTree);
+                        pending.extend([WatchedKind::WorkingTree, WatchedKind::Index,
+                            WatchedKind::Head, WatchedKind::Refs, WatchedKind::Remote]);
                     }
                     if deadline.is_none() {
                         deadline = Some(tokio::time::Instant::now() + DEBOUNCE);
@@ -277,6 +294,45 @@ mod tests {
                 Path::new("/somewhere/else/feature-worktree/README.md")
             ),
             Some(WatchedKind::WorkingTree)
+        );
+    }
+
+    #[tokio::test]
+    async fn resolves_linked_worktree_shared_refs_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("main");
+        std::fs::create_dir(&repo).unwrap();
+        for args in [
+            vec!["init", "-q"],
+            vec![
+                "-c",
+                "user.name=T",
+                "-c",
+                "user.email=t@example.com",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "base",
+            ],
+        ] {
+            git(&repo, &args, GitOpts::default()).await.unwrap();
+        }
+        let linked = root.path().join("linked");
+        git(
+            &repo,
+            &["worktree", "add", "-b", "linked", linked.to_str().unwrap()],
+            GitOpts::default(),
+        )
+        .await
+        .unwrap();
+        let (private, common) = resolve_git_dirs(&linked).await.unwrap();
+        assert_ne!(private, common);
+        assert_eq!(common, repo.join(".git").canonicalize().unwrap());
+        assert_eq!(
+            classify(&common, &linked, &common.join("refs/heads/main")),
+            Some(WatchedKind::Refs)
         );
     }
 

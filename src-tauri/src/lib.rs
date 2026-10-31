@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod credentials;
+mod desktop;
 pub mod error;
 pub mod events;
 pub mod git;
@@ -32,6 +33,7 @@ pub fn run() {
         .manage(AppState::default())
         .manage(ai::AiState::default())
         .setup(|app| {
+            desktop::install(app.handle())?;
             // Best-effort discard-trash purge (ARCHITECTURE.md §7.3) — never blocks startup.
             git::discard::purge_old_entries(&app.handle().clone());
             // Reap a `llama-server` left running by a previous session that crashed or was
@@ -42,7 +44,15 @@ pub fn run() {
             tauri::async_runtime::spawn(ai::local::run_idle_monitor(app.handle().clone()));
             Ok(())
         })
+        .on_menu_event(|app, event| desktop::handle_menu(app, event.id().as_ref()))
         .on_window_event(|window, event| {
+            // macOS keeps the application alive after its window closes. Retain the shell so
+            // clicking the Dock icon can reopen it with its tabs and unfinished work intact.
+            #[cfg(target_os = "macos")]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
             // Drives the auto-fetch focus gate (ARCHITECTURE.md §7.2) and macOS app-nap pause
             // (§14) — auto-fetch simply checks this flag on its next tick rather than being
             // started/stopped per window.
@@ -56,10 +66,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             save_text_file,
+            desktop::set_window_context,
             repo::open_repo,
             repo::clone_repo,
             repo::close_repo,
             repo::list_recents,
+            repo::check_git_available,
             repo::check_git_identity,
             repo::set_git_identity,
             git::log::get_graph,
@@ -174,6 +186,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
             // Make sure the local AI sidecar (if running) doesn't outlive the app — ARCHITECTURE.md
             // §10's "kill on app exit".
             if let tauri::RunEvent::Exit = event {

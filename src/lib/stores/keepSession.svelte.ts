@@ -93,6 +93,8 @@ export class KeepSession {
 
 	#deps: KeepSessionDeps;
 	#unlisten: UnlistenFn | null = null;
+	#session = 0;
+	#request = 0;
 	#advanceTimer: ReturnType<typeof setTimeout> | undefined;
 
 	constructor(deps: Partial<KeepSessionDeps> = {}) {
@@ -123,22 +125,26 @@ export class KeepSession {
 
 	async open(repoId: string): Promise<void> {
 		if (this.repoId === repoId) return;
-		await this.close();
+		void this.close();
+		const session = this.#session;
 		this.repoId = repoId;
-		this.#unlisten = await this.#deps.onRepoChanged(repoId, (kind) => {
+		const unlisten = await this.#deps.onRepoChanged(repoId, (kind) => {
+			if (session !== this.#session) return;
 			if (kind.kind === "workingTree" || kind.kind === "index" || kind.kind === "head") {
 				void this.refresh();
 			}
 		});
+		if (session !== this.#session) { unlisten(); return; }
+		this.#unlisten = unlisten;
 		await this.refresh();
 	}
 
 	async close(): Promise<void> {
+		this.#session += 1;
+		this.#request += 1;
 		clearTimeout(this.#advanceTimer);
-		if (this.#unlisten) {
-			await this.#unlisten();
-			this.#unlisten = null;
-		}
+		this.#unlisten?.();
+		this.#unlisten = null;
 		this.repoId = null;
 		this.state = null;
 		this.allFiles = [];
@@ -152,7 +158,9 @@ export class KeepSession {
 	 * whole session down so the banner and panel disappear. */
 	async refresh(): Promise<void> {
 		if (!this.repoId) return;
+		const request = ++this.#request;
 		const next = await this.#deps.getConflictState(this.repoId);
+		if (request !== this.#request) return;
 		if (!next) {
 			this.state = null;
 			this.allFiles = [];
@@ -177,13 +185,16 @@ export class KeepSession {
 		}
 
 		for (const f of next.files) {
+			if (request !== this.#request) return;
 			if (!this.entries[f]) await this.#loadEntry(f);
 		}
 	}
 
 	async #loadEntry(path: string): Promise<void> {
 		if (!this.repoId || !this.state) return;
+		const session = this.#session;
 		const regions = await this.#deps.getConflictRegions(this.repoId, path);
+		if (session !== this.#session || !this.state) return;
 		const store = new KeepPanelStore();
 		// ours = the branch we're on / rebasing onto (stage :2:, `target_label`); theirs = the
 		// incoming side (stage :3:, `source_label`) — DESIGN_SPEC.md §9.2's blue "yours" / purple

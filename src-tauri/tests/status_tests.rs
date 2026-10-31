@@ -125,3 +125,39 @@ async fn handles_non_utf8_filename() {
         .iter()
         .any(|e| e.path.starts_with("bad-") && e.path.contains("name.txt")));
 }
+
+#[tokio::test]
+async fn unborn_repo_lists_nested_untracked_files_and_ignored_files_stay_hidden() {
+    let repo = TestRepo::init().await;
+    repo.write(".gitignore", "ignored/\n");
+    repo.write("new folder/a file.txt", "one\n");
+    repo.write("new folder/b.txt", "two\n");
+    repo.write("ignored/build.txt", "noise\n");
+    let report = status::status(repo.path()).await.unwrap();
+    assert_eq!(report.branch.head.as_deref(), Some("main"));
+    assert_eq!(report.branch.oid, None);
+    assert!(report
+        .entries
+        .iter()
+        .any(|e| e.path == "new folder/a file.txt"));
+    assert!(report.entries.iter().any(|e| e.path == "new folder/b.txt"));
+    assert!(!report.entries.iter().any(|e| e.path.starts_with("ignored")));
+}
+
+#[tokio::test]
+async fn reports_deleted_and_unusual_paths_without_quoting() {
+    let repo = TestRepo::init().await;
+    repo.write("delete.txt", "one\n");
+    repo.commit_all("base").await;
+    repo.remove("delete.txt");
+    repo.write("space and ünicode.txt", "two\n");
+    let report = status::status(repo.path()).await.unwrap();
+    assert!(report
+        .entries
+        .iter()
+        .any(|e| e.path == "delete.txt" && e.worktree_status == FileStatusCode::Deleted));
+    assert!(report
+        .entries
+        .iter()
+        .any(|e| e.path == "space and ünicode.txt"));
+}

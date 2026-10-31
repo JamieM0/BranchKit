@@ -142,3 +142,13 @@ async fn head_info_reports_detached_state() {
     assert_eq!(head.branch, None);
     assert_eq!(head.sha, sha);
 }
+
+#[tokio::test]
+async fn unborn_head_keeps_branch_name_without_a_commit() {
+    let repo = TestRepo::init().await;
+    let head = refs::head_info(repo.path()).await.unwrap();
+    assert_eq!(head.branch.as_deref(), Some("main"));
+    assert!(!head.detached);
+    assert!(head.sha.is_empty());
+    assert!(refs::list_refs(repo.path()).await.unwrap().is_empty());
+}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { status } from "$lib/stores/status.svelte";
 	import { graph } from "$lib/stores/graph.svelte";
 	import * as ipc from "$lib/ipc";
 	import { toasts } from "$lib/stores/toasts.svelte";
@@ -35,6 +36,7 @@
 	let diff = $state<FileDiff | null>(null);
 	let loadError = $state<string | null>(null);
 	let loading = $state(false);
+	let requestId = 0;
 	let viewMode = $state<"unified" | "split">("unified");
 	let ignoreWhitespace = $state(false);
 	let expandedHunks = $state<Set<number>>(new Set());
@@ -192,6 +194,7 @@
 	async function loadDiff() {
 		const id = repoId;
 		if (!id) return;
+		const request = ++requestId;
 		loading = true;
 		loadError = null;
 		diff = null;
@@ -221,12 +224,13 @@
 					result = await ipc.getDiffCommitVsWorking(id, target.source.sha, path, iw);
 					break;
 			}
+			if (request !== requestId) return;
 			diff = result;
 			if (result.isImage) await loadImages(id, result);
 		} catch (e) {
-			loadError = e instanceof Error ? e.message : String(e);
+			if (request === requestId) loadError = asAppError(e).userMessage;
 		} finally {
-			loading = false;
+			if (request === requestId) loading = false;
 		}
 	}
 
@@ -267,6 +271,7 @@
 	$effect(() => {
 		void target;
 		void ignoreWhitespace;
+		if (isWorkingCopy) void status.report;
 		void loadDiff();
 	});
 

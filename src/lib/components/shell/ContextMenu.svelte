@@ -5,6 +5,7 @@
 	 * right-aligned, and disabled items carry a tooltip explaining why (title attribute — DESIGN_SPEC
 	 * §14 "tooltips on everything"). Self-recursive: a submenu is just another `<ContextMenu>`
 	 * anchored off its parent item. */
+	import { tick } from "svelte";
 	import ContextMenu from "./ContextMenu.svelte";
 
 	export type MenuItem =
@@ -28,12 +29,14 @@
 		y,
 		onDismiss,
 		ariaLabel = "Context menu",
+		onBack,
 	}: {
 		items: MenuItem[];
 		x: number;
 		y: number;
 		onDismiss: () => void;
 		ariaLabel?: string;
+		onBack?: () => void;
 	} = $props();
 
 	let openSubmenu = $state<number | null>(null);
@@ -77,18 +80,40 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === "Escape") {
-			e.stopPropagation();
+		e.stopPropagation();
+		const buttons = Array.from((e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>(':scope > button:not(:disabled)'));
+		const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+		if (e.key === "Escape" || e.key === "ArrowLeft") {
+			e.preventDefault();
+			(onBack ?? onDismiss)();
+		} else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+			e.preventDefault();
+			const next = e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 :
+				(index + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+			buttons[next]?.focus();
+		} else if (e.key === "ArrowRight") {
+			const button = buttons[index];
+			if (button?.getAttribute("aria-haspopup") === "menu") {
+				e.preventDefault();
+				if (button.getAttribute("aria-expanded") !== "true") button.click();
+			}
+		} else if (e.key === "Tab") {
+			e.preventDefault();
 			onDismiss();
 		}
 	}
 
-	/** Root menus need to receive keydown events without a mouse interaction first, so give the
-	 * menu focus as soon as it mounts (nested submenus don't call this — the root listener already
-	 * covers them since Escape bubbles up, but each submenu also stops propagation once handled). */
 	function focusMenu(node: HTMLElement) {
-		node.focus();
+		const previous = document.activeElement as HTMLElement | null;
+		void tick().then(() => {
+			if (node.isConnected) (node.querySelector<HTMLElement>('button:not(:disabled)') ?? node).focus();
+		});
+		return { destroy() {
+			clearTimeout(hoverTimer);
+			queueMicrotask(() => { if (previous?.isConnected) previous.focus({ preventScroll: true }); });
+		} };
 	}
+
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
@@ -142,6 +167,7 @@
 			x={submenuPos.x}
 			y={submenuPos.y}
 			onDismiss={onDismiss}
+			onBack={() => { openSubmenu = null; }}
 			ariaLabel={submenuItem.label}
 		/>
 	{/if}
@@ -165,7 +191,7 @@
 		background: var(--overlay);
 		border: 1px solid var(--border);
 		border-radius: var(--radius-card);
-		box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+		box-shadow: 0 8px 24px var(--shadow-color);
 		display: flex;
 		flex-direction: column;
 	}

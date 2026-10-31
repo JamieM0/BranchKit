@@ -126,6 +126,7 @@ export class GraphStore {
 	/** Monotonic request id: overlapping watcher refreshes must never let an older refs snapshot
 	 * replace a newer one. Refs and Remote are emitted back-to-back by network operations, and
 	 * reads intentionally do not take the backend mutation lock (ARCHITECTURE §2). */
+	#session = 0;
 	#refsRequestId = 0;
 	#topologyRequestId = 0;
 	#persistenceKey: string | null = null;
@@ -135,32 +136,40 @@ export class GraphStore {
 	}
 
 	async open(repoId: string, persistenceKey: string = repoId): Promise<void> {
-		await this.close();
+		void this.close();
+		const session = this.#session;
 		this.repoId = repoId;
 		this.#persistenceKey = encodeURIComponent(persistenceKey);
 		this.hiddenBranches = loadHiddenBranches(this.#persistenceKey);
 		this.loading = true;
 		this.error = null;
-		this.#unlisten = await this.#deps.onRepoChanged(repoId, (kind) => {
-			void this.handleChange(kind);
+		const unlisten = await this.#deps.onRepoChanged(repoId, (kind) => {
+			if (session !== this.#session) return;
+			void this.handleChange(kind).catch((error) => {
+				if (session === this.#session) this.error = error;
+			});
 		});
+		if (session !== this.#session) { unlisten(); return; }
+		this.#unlisten = unlisten;
 		try {
 			await this.refreshRefs();
+			if (session !== this.#session) return;
 			await Promise.all([this.reloadTopology(), this.refreshWorktrees()]);
 		} catch (e) {
-			this.error = e;
+			if (session === this.#session) this.error = e;
 			throw e;
 		} finally {
-			this.loading = false;
+			if (session === this.#session) this.loading = false;
 		}
 	}
 
 	async close(): Promise<void> {
-		if (this.#unlisten) {
-			await this.#unlisten();
-			this.#unlisten = null;
-		}
+		this.#session += 1;
+		this.#unlisten?.();
+		this.#unlisten = null;
 		this.repoId = null;
+		this.loading = false;
+		this.error = null;
 		this.laneRows = [];
 		this.laneColors = [];
 		this.passSpansByLane = [];
@@ -230,12 +239,17 @@ export class GraphStore {
 	}
 
 	async refreshWorktrees(): Promise<void> {
-		if (!this.repoId) return;
-		this.worktrees = await this.#deps.getWorktrees(this.repoId);
+		const repoId = this.repoId;
+		const session = this.#session;
+		if (!repoId) return;
+		const worktrees = await this.#deps.getWorktrees(repoId);
+		if (session === this.#session) this.worktrees = worktrees;
 	}
 
 	async ensureMetadataForWindow(start: number, end: number): Promise<void> {
-		if (!this.repoId) return;
+		const repoId = this.repoId;
+		const session = this.#session;
+		if (!repoId) return;
 		const missing = uniqueMissingCommitShas(
 			this.laneRows,
 			this.metaBySha,
@@ -249,12 +263,13 @@ export class GraphStore {
 			const batch = missing.slice(i, i + METADATA_BATCH_SIZE);
 			for (const sha of batch) this.#metaInFlight.add(sha);
 			try {
-				const metas = await this.#deps.getCommitMeta(this.repoId, batch);
+				const metas = await this.#deps.getCommitMeta(repoId, batch);
+				if (session !== this.#session) return;
 				const next = { ...this.metaBySha };
 				for (const meta of metas) next[meta.sha] = meta;
 				this.metaBySha = next;
 			} finally {
-				for (const sha of batch) this.#metaInFlight.delete(sha);
+				if (session === this.#session) for (const sha of batch) this.#metaInFlight.delete(sha);
 			}
 		}
 	}
@@ -264,7 +279,10 @@ export class GraphStore {
 			return;
 		}
 		if (kind.kind === "refs") {
-			await Promise.all([this.refreshRefs(), this.refreshWorktrees()]);
+			const before = this.refs.map((ref) => `${ref.name}:${ref.sha}`).sort().join("\n");
+			await this.refreshRefs();
+			const after = this.refs.map((ref) => `${ref.name}:${ref.sha}`).sort().join("\n");
+			await Promise.all([...(before !== after ? [this.reloadTopology()] : []), this.refreshWorktrees()]);
 			return;
 		}
 		if (kind.kind === "remote") {

@@ -1,9 +1,10 @@
 <script lang="ts">
+	import PanelResizeHandle from "$lib/components/shell/PanelResizeHandle.svelte";
+	import { settings } from "$lib/stores/settings.svelte";
 	import { graphSelection } from "$lib/stores/graphSelection.svelte";
 	import { prPanel } from "$lib/stores/prPanel.svelte";
 	import { graph } from "$lib/stores/graph.svelte";
 	import { commitExplanation } from "$lib/stores/commitExplanation.svelte";
-	import { status } from "$lib/stores/status.svelte";
 	import WorkingDirectoryPanel from "./WorkingDirectoryPanel.svelte";
 	import CommitDetailPanel from "./CommitDetailPanel.svelte";
 	import ComparePanel from "./ComparePanel.svelte";
@@ -34,23 +35,21 @@
 		}
 	});
 
-	// The panel only exists when it has something to say: a selection/compare/PR, or a dirty
-	// working tree to stage & commit. A clean tree with nothing selected → no panel at all,
-	// giving the graph the full width instead of showing "0 changes / no changes" boilerplate.
-	const hasWip = $derived(status.report.entries.length > 0);
+	// Keep the working-directory panel visible so clean status and Amend remain discoverable (§11).
 	const visible = $derived(
 		compare !== null ||
 			selectedSha !== null ||
 			prPanel.creating ||
 			prPanel.selectedNumber !== null ||
-			hasWip,
+			repoId !== null,
 	);
 </script>
 
 {#if !visible}
 	<!-- nothing selected, nothing to commit — the graph gets the space -->
 {:else}
-<aside class="panel">
+<aside class="panel" style:--panel-width={`${settings.rightPanelWidth}px`}>
+	<PanelResizeHandle side="right" value={settings.rightPanelWidth} onChange={(value) => settings.setPanelWidth("right", value)} onReset={() => settings.resetPanelWidth("right")} />
 	{#if compare}
 		<ComparePanel a={compare.a} b={compare.b} />
 	{:else if prPanel.creating && repoId}
@@ -73,8 +72,10 @@
 	.panel {
 		display: flex;
 		flex-direction: column;
-		width: 320px;
-		min-width: 260px;
+		width: min(var(--panel-width), 36vw);
+		min-width: 220px;
+		position: relative;
+		flex-shrink: 0;
 		height: 100%;
 		background: var(--surface);
 		border-left: 1px solid var(--border);

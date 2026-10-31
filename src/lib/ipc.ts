@@ -45,6 +45,16 @@ import type {
 
 /** The ONLY place invoke() is called — ARCHITECTURE.md §1. */
 
+export type DesktopAction = "open_repo" | "clone_repo" | "repo_picker" | "close_repo" | "settings" | "command_palette";
+
+export function onDesktopAction(handler: (action: DesktopAction) => void): Promise<UnlistenFn> {
+  return listen<DesktopAction>("app://menu", (event) => handler(event.payload));
+}
+
+export function setWindowContext(title: string, canCloseTab: boolean, modalOpen: boolean): Promise<void> {
+  return invoke("set_window_context", { title, canCloseTab, modalOpen });
+}
+
 export async function openRepo(path: string): Promise<RepoInfo> {
   return invoke("open_repo", { path });
 }
@@ -63,6 +73,10 @@ export async function closeRepo(id: string): Promise<void> {
 
 export async function listRecents(): Promise<RecentRepo[]> {
   return invoke("list_recents");
+}
+
+export async function checkGitAvailable(): Promise<void> {
+  return invoke("check_git_available");
 }
 
 export async function checkGitIdentity(): Promise<GitIdentity> {

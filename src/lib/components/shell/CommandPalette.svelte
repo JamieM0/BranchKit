@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { tick } from "svelte";
+  import { settingsWindow } from "$lib/stores/settingsWindow.svelte";
+  import { modal } from "$lib/modal";
 	import { fuzzyFilter } from "$lib/fuzzy";
 	import { commandPalette } from "$lib/stores/commandPalette.svelte";
 	import { graph } from "$lib/stores/graph.svelte";
@@ -18,6 +21,8 @@
 	 * Fuzzy match across all rows at once so a query can jump straight to whichever section has the
 	 * best hit — the section headers just group the results, they don't gate the search. */
 
+  let { onOpen, onClone }: { onOpen: () => void; onClone: () => void } = $props();
+
 	const repoId = $derived(graph.repoId);
 	const currentBranch = $derived(graph.head && !graph.head.detached ? graph.head.branch : null);
 
@@ -33,7 +38,12 @@
 	let inputEl = $state<HTMLInputElement | null>(null);
 
 	function actionRows(): Row[] {
-		if (!repoId) return [];
+		const general: Row[] = [
+			{ section: "Actions", label: "Open repository…", hint: "⌘O", run: onOpen },
+			{ section: "Actions", label: "Clone repository…", hint: "⌘⇧O", run: onClone },
+			{ section: "Actions", label: "Settings…", hint: "⌘,", run: () => settingsWindow.show() },
+		];
+		if (!repoId) return general;
 		const hasStaged = stagedRows(status.report.entries).length > 0;
 		const hasAny = status.report.entries.length > 0;
 		const rows: Row[] = [];
@@ -61,7 +71,7 @@
 		if (graph.stashes.length > 0) {
 			rows.push({ section: "Actions", label: "Pop latest stash", hint: "⌘⇧S", run: () => void actions.popStash(repoId, "stash@{0}") });
 		}
-		return rows;
+		return [...rows, ...general];
 	}
 
 	function branchRows(): Row[] {
@@ -128,6 +138,12 @@
 		}
 	});
 
+	$effect(() => {
+		const index = activeIndex;
+		if (!commandPalette.isOpen) return;
+		void tick().then(() => document.getElementById(`palette-result-${index}`)?.scrollIntoView({ block: "nearest" }));
+	});
+
 	function close() {
 		commandPalette.close();
 	}
@@ -170,7 +186,7 @@
 {#if commandPalette.isOpen}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 	<div class="scrim" onclick={close}></div>
-	<div class="palette" role="dialog" aria-label="Command palette">
+	<div class="palette" tabindex="-1" role="dialog" aria-modal="true" use:modal aria-label="Command palette" onkeydown={onKeydown}>
 		<input
 			bind:this={inputEl}
 			bind:value={query}
@@ -179,7 +195,6 @@
 			placeholder="Search actions, branches, files, repos…"
 			spellcheck="false"
 			autocomplete="off"
-			onkeydown={onKeydown}
 		/>
 		<div class="results">
 			{#if filtered.length === 0}
@@ -191,9 +206,11 @@
 						{@const idx = flatIndexOf(row)}
 						<button
 							type="button"
+							id={`palette-result-${idx}`}
 							class="row"
 							class:active={idx === activeIndex}
 							onmouseenter={() => (activeIndex = idx)}
+							onfocus={() => (activeIndex = idx)}
 							onclick={(e) => pick(row, e)}
 						>
 							<span class="label">{row.label}</span>
@@ -211,7 +228,7 @@
 		position: fixed;
 		inset: 0;
 		z-index: 100;
-		background: rgb(0 0 0 / 0.35);
+		background: var(--shadow-color);
 	}
 
 	.palette {
@@ -227,7 +244,7 @@
 		background: var(--overlay);
 		border: 1px solid var(--border);
 		border-radius: var(--radius-card);
-		box-shadow: 0 16px 48px rgb(0 0 0 / 0.45);
+		box-shadow: 0 16px 48px var(--shadow-color);
 		overflow: hidden;
 	}
 

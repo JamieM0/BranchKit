@@ -162,10 +162,17 @@ pub async fn list_refs(repo: &Path) -> Result<Vec<RefInfo>, GitError> {
 
 /// Current branch / detached-HEAD state — ARCHITECTURE.md §5.3.
 pub async fn head_info(repo: &Path) -> Result<HeadInfo, GitError> {
-    let sha_output = git(repo, &["rev-parse", "HEAD"], GitOpts::default()).await?;
-    let sha = String::from_utf8_lossy(&sha_output.stdout)
-        .trim()
-        .to_string();
+    let sha = match git(
+        repo,
+        &["rev-parse", "--verify", "--quiet", "HEAD"],
+        GitOpts::default(),
+    )
+    .await
+    {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        Err(e) if e.kind == GitErrorKind::NonZeroExit && e.code == Some(1) => String::new(),
+        Err(e) => return Err(e),
+    };
 
     match git(
         repo,

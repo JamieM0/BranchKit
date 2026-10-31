@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { modal } from "$lib/modal";
   import { fuzzyFilter } from "$lib/fuzzy";
   import { listRecents, pickFolder } from "$lib/ipc";
   import type { RecentRepo } from "$lib/types";
@@ -14,6 +15,7 @@
   } = $props();
 
   let query = $state("");
+  let pickerEl: HTMLDivElement;
   let recents: RecentRepo[] = $state([]);
   let inputEl: HTMLInputElement | undefined = $state();
 
@@ -35,7 +37,19 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") {
+    if (e.defaultPrevented) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const rows = Array.from(pickerEl.querySelectorAll<HTMLButtonElement>(".results button"));
+      const index = rows.indexOf(document.activeElement as HTMLButtonElement);
+      const next = index === -1 ? (e.key === "ArrowDown" ? 0 : rows.length - 1) :
+        (index + (e.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
+      e.preventDefault();
+      rows[next]?.focus();
+    } else if (e.key === "Enter" && e.target === inputEl) {
+      e.preventDefault();
+      if (query.trim() && filteredRecents[0]) onOpenPath(filteredRecents[0].item.path);
+      else if (!query.trim()) void handleOpenBrowse();
+    } else if (e.key === "Escape") {
       e.preventDefault();
       onDismiss();
     }
@@ -47,7 +61,7 @@
 </script>
 
 <div class="scrim" onclick={handleScrimClick} onkeydown={handleKeydown} role="presentation">
-  <div class="picker" role="dialog" aria-modal="true" aria-label="Open or clone a repository">
+  <div class="picker" bind:this={pickerEl} role="dialog" use:modal aria-modal="true" aria-label="Open or clone a repository">
     <input
       bind:this={inputEl}
       bind:value={query}
@@ -87,7 +101,7 @@
   .scrim {
     position: fixed;
     inset: 0;
-    background: rgb(0 0 0 / 40%);
+    background: var(--scrim);
     display: flex;
     align-items: flex-start;
     justify-content: center;
@@ -103,7 +117,7 @@
     background: var(--overlay);
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
-    box-shadow: 0 16px 48px rgb(0 0 0 / 35%);
+    box-shadow: 0 16px 48px var(--shadow-color);
     overflow: hidden;
   }
 

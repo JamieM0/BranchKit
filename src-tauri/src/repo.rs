@@ -21,9 +21,7 @@ pub struct RepoInfo {
     pub id: String,
     pub path: String,
     pub name: String,
-    /// `None` on an unborn branch (no commits yet) as well as on a real detached HEAD — the
-    /// distinction doesn't matter for a tab label; the empty-graph state (DESIGN_SPEC §11)
-    /// covers the unborn case in the UI.
+    /// Symbolic branch name, including before the first commit. `None` when detached.
     pub branch: Option<String>,
     pub detached: bool,
 }
@@ -123,16 +121,8 @@ fn record_recent(app: &AppHandle, path: &Path, name: &str) {
     let _ = save_recents(app, &recents);
 }
 
-/// Opens (or, if already open, returns the existing handle for) the repo containing `path`.
-/// Accepts any path inside a worktree, not just its root — `git rev-parse --show-toplevel`
-/// resolves it and also validates that it *is* a git repo in the first place.
-#[tauri::command]
-pub async fn open_repo(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<RepoInfo, AppError> {
-    let requested = PathBuf::from(&path);
+async fn resolve_worktree(path: &str) -> Result<PathBuf, AppError> {
+    let requested = PathBuf::from(path);
     let toplevel = git(
         &requested,
         &["rev-parse", "--show-toplevel"],
@@ -148,7 +138,20 @@ pub async fn open_repo(
             e.to_string(),
         )
     })?;
-    let canonical = PathBuf::from(String::from_utf8_lossy(&toplevel.stdout).trim().to_string());
+    Ok(PathBuf::from(String::from_utf8_lossy(&toplevel.stdout).trim_end_matches('\n').to_string()).canonicalize()?)
+
+}
+
+/// Opens (or, if already open, returns the existing handle for) the repo containing `path`.
+/// Accepts any path inside a worktree, not just its root — `git rev-parse --show-toplevel`
+/// resolves it and also validates that it *is* a git repo in the first place.
+#[tauri::command]
+pub async fn open_repo(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<RepoInfo, AppError> {
+    let canonical = resolve_worktree(&path).await?;
 
     if let Some(existing) = state.find_by_path(&canonical) {
         let info = repo_info(&existing).await?;
@@ -260,6 +263,15 @@ pub async fn list_recents(app: AppHandle) -> Result<Vec<RecentRepo>, AppError> {
 }
 
 #[tauri::command]
+pub async fn check_git_available() -> Result<(), AppError> {
+    let version = crate::git::exec::detect_git_version().await?;
+    if !version.is_supported() {
+        return Err(AppError::new("BranchKit needs Git 2.30 or newer", format!("Found Git {}.{}.{}", version.major, version.minor, version.patch)));
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn check_git_identity() -> Result<GitIdentity, AppError> {
     Ok(identity::get_identity().await?)
 }
@@ -333,6 +345,31 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn recognizes_nested_paths_and_rejects_non_repositories() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("repo with spaces");
+        std::fs::create_dir(&repo).unwrap();
+        init_repo(&repo).await;
+        let nested = repo.join("src/deep");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(resolve_worktree(nested.to_str().unwrap()).await.unwrap(), repo.canonicalize().unwrap());
+        assert!(resolve_worktree(root.path().to_str().unwrap()).await.is_err());
+        assert!(resolve_worktree(root.path().join("missing").to_str().unwrap()).await.is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlink_and_real_path_resolve_to_the_same_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        init_repo(&repo).await;
+        let alias = root.path().join("alias");
+        std::os::unix::fs::symlink(&repo, &alias).unwrap();
+        assert_eq!(resolve_worktree(repo.to_str().unwrap()).await.unwrap(), resolve_worktree(alias.to_str().unwrap()).await.unwrap());
     }
 
     #[tokio::test]

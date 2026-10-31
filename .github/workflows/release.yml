@@ -2,7 +2,7 @@ name: Release
 
 # Builds and publishes installers when a version tag is pushed (ARCHITECTURE.md §12):
 #   git tag v0.1.0 && git push origin v0.1.0
-# Produces: .dmg (macOS arm64 + x64), .msi/.exe (Windows), .AppImage + .deb (Linux),
+# Produces: .dmg (macOS universal: Apple Silicon + Intel), .msi/.exe (Windows), .AppImage + .deb (Linux),
 # attached to a draft GitHub Release for a final once-over before publishing.
 
 on:
@@ -18,10 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest # arm64
-            args: "--target aarch64-apple-darwin --bundles dmg"
-          - platform: macos-latest # Intel
-            args: "--target x86_64-apple-darwin --bundles dmg"
+          - platform: macos-latest
+            args: "--target universal-apple-darwin --bundles dmg"
           - platform: ubuntu-22.04
             args: "--bundles appimage,deb"
           - platform: windows-latest

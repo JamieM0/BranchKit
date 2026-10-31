@@ -73,6 +73,15 @@ describe("GraphStore", () => {
 		expect(store.laneComputeCount).toBe(1);
 	});
 
+	it("reloads topology when an external branch ref moves", async () => {
+		const storeDeps = deps();
+		const store = new GraphStore(storeDeps);
+		await store.open("repo-1");
+		vi.mocked(storeDeps.getRefs).mockResolvedValue({ refs: [{ ...mainRef, sha: "C" }], head: { ...head, sha: "C" } });
+		await store.handleChange({ kind: "refs" });
+		expect(storeDeps.getGraph).toHaveBeenCalledTimes(2);
+	});
+
 	it("does not let an older refs read restore a stale remote-only pill", async () => {
 		const oldRead = deferred<{ refs: RefInfo[]; head: HeadInfo }>();
 		const freshRead = deferred<{ refs: RefInfo[]; head: HeadInfo }>();

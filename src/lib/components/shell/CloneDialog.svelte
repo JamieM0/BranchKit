@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { modal } from "$lib/modal";
   import { pickFolder } from "$lib/ipc";
   import { repos } from "$lib/stores/repo.svelte";
   import { appSettings } from "$lib/stores/appSettings.svelte";
@@ -65,7 +66,7 @@
 </script>
 
 <div class="scrim" onkeydown={handleKeydown} role="presentation">
-  <div class="dialog" role="dialog" aria-modal="true" aria-label="Clone a repository">
+  <div class="dialog" role="dialog" use:modal aria-modal="true" aria-label="Clone a repository">
     <h2>Clone a repository</h2>
 
     {#if phase === "form" || phase === "error"}
@@ -125,7 +126,7 @@
   .scrim {
     position: fixed;
     inset: 0;
-    background: rgb(0 0 0 / 40%);
+    background: var(--scrim);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -140,7 +141,7 @@
     background: var(--overlay);
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
-    box-shadow: 0 16px 48px rgb(0 0 0 / 35%);
+    box-shadow: 0 16px 48px var(--shadow-color);
     padding: var(--space-5);
   }
 
