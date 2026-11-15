@@ -1,5 +1,7 @@
 //! Native desktop chrome and application commands (DESIGN_SPEC §§3, 10, 14).
-use tauri::{menu::{AboutMetadata, Menu, MenuItem, SubmenuBuilder}, AppHandle, Emitter, Manager};
+#[cfg(target_os = "macos")]
+use tauri::menu::AboutMetadata;
+use tauri::{menu::{Menu, MenuItem, SubmenuBuilder}, AppHandle, Emitter, Manager};
 
 pub fn install(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open_repo", "Open Repository…", true, Some("CmdOrCtrl+O"))?;
